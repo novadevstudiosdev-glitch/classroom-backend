@@ -10,6 +10,7 @@ function buildTypeOrmOptions(configService: ConfigService): TypeOrmModuleOptions
       url: databaseUrl,
       autoLoadEntities: true,
       synchronize: false,
+      ssl: { rejectUnauthorized: false }, // Requerido por Supabase
       logging: true,
     };
   }
@@ -28,7 +29,7 @@ function buildTypeOrmOptions(configService: ConfigService): TypeOrmModuleOptions
     password,
     database,
     autoLoadEntities: true,
-    synchronize: false,
+    synchronize: configService.get<boolean>('DB_SYNCHRONIZE'),
     logging: true,
   };
 }

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import configuration from './config/configuration';
 import { envValidationSchema } from './config/env.validation';
 import { typeOrmAsyncConfig } from './config/typeorm.config';
@@ -23,10 +25,20 @@ import { UsersModule } from './modules/users/users.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: '.env',
       load: [configuration],
       validationSchema: envValidationSchema,
     }),
     TypeOrmModule.forRootAsync(typeOrmAsyncConfig),
+
+    // Rate limiting global: 100 requests / minuto por IP
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // 1 minuto en ms
+        limit: 100,
+      },
+    ]),
+
     AuthModule,
     UsersModule,
     TeachersModule,
@@ -41,7 +53,13 @@ import { UsersModule } from './modules/users/users.module';
     AdminModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Aplicar ThrottlerGuard globalmente
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}
-
