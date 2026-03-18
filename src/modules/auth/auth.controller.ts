@@ -9,6 +9,7 @@ import { RegisterStudentDto } from './dto/register-student.dto';
 import { RegisterParentDto } from './dto/register-parent.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 import { RecaptchaGuard } from './guards/recaptcha.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -120,7 +121,7 @@ export class AuthController {
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verificar email con token del link' })
-  async verifyEmail(@Body('token') token: string) {
+  async verifyEmail(@Body() { token }: VerifyEmailDto) {
     return this.authService.verifyEmail(token);
   }
 
