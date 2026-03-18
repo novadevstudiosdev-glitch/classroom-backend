@@ -9,7 +9,7 @@ function buildTypeOrmOptions(configService: ConfigService): TypeOrmModuleOptions
       type: 'postgres',
       url: databaseUrl,
       autoLoadEntities: true,
-      synchronize: false,
+      synchronize: configService.get<string>('NODE_ENV') === 'development',
       ssl: { rejectUnauthorized: false }, // Requerido por Supabase
       logging: true,
     };
