@@ -9,6 +9,8 @@ import { RegisterStudentDto } from './dto/register-student.dto';
 import { RegisterParentDto } from './dto/register-parent.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { RecaptchaGuard } from './guards/recaptcha.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -113,6 +115,14 @@ export class AuthController {
   }
 
   // ─────────────────────────────────────────────────
+  @Public()
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reenviar email de verificacion' })
+  async resendVerification(@Body() dto: ResendVerificationDto) {
+    return this.authService.resendVerificationEmail(dto.email);
+  }
+
   // VERIFY EMAIL
   // ─────────────────────────────────────────────────
 
@@ -120,8 +130,8 @@ export class AuthController {
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verificar email con token del link' })
-  async verifyEmail(@Body('token') token: string) {
-    return this.authService.verifyEmail(token);
+  async verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.authService.verifyEmail(dto.token);
   }
 
   // ─────────────────────────────────────────────────
