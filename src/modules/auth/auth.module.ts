@@ -12,7 +12,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 
-Entities;
+// Entities
 import { User } from '../users/entities/user.entity';
 import { TeacherProfile } from '../teachers/entities/teacher-profile.entity';
 import { StudentProfile } from '../students/entities/student-profile.entity';
