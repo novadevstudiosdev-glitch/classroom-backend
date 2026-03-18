@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(cmd /c \"netstat -ano | findstr :3000\")",
+      "Bash(cmd /c \"netstat -ano\")",
+      "Bash(cmd /c \"tasklist | findstr node\")",
+      "Bash(cmd /c \"taskkill /F /IM node.exe /T\")",
+      "Bash(cmd /c \"taskkill /F /IM node.exe\")",
+      "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object LocalPort, State, OwningProcess | Format-Table\")",
+      "Bash(grep '\"\"resend\"\"' package.json)"
+    ]
+  }
+}

@@ -33,8 +33,8 @@ export const envValidationSchema = Joi.object({
 
   RESEND_API_KEY: Joi.string().optional(),
 
-  REDIS_HOST: Joi.string().optional(),
-  REDIS_PORT: Joi.number().port().optional(),
+  REDIS_HOST: Joi.string().allow('').optional(),
+  REDIS_PORT: Joi.alternatives().try(Joi.number().port(), Joi.string().allow('')).optional(),
 
   FRONTEND_URL: Joi.string().required(),
 });

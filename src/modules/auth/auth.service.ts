@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
+import { EmailService } from '../email/email.service';
 
 // Entities
 import { User } from '../users/entities/user.entity';
@@ -19,6 +21,9 @@ import { RegisterStudentDto } from './dto/register-student.dto';
 import { RegisterParentDto } from './dto/register-parent.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
+
+// Entities extra para vinculación padre-alumno
+import { ParentStudent } from '../parents/entities/parent-student.entity';
 
 @Injectable()
 export class AuthService {
@@ -43,8 +48,12 @@ export class AuthService {
     @InjectRepository(ClassroomStudent)
     private classroomStudentRepo: Repository<ClassroomStudent>,
 
+    @InjectRepository(ParentStudent)
+    private parentStudentRepo: Repository<ParentStudent>,
+
     private jwtService: JwtService,
     private configService: ConfigService,
+    private emailService: EmailService,
   ) {}
 
   // ─────────────────────────────────────────────────
@@ -76,7 +85,18 @@ export class AuthService {
 
     await this.teacherRepo.save(profile);
 
-    // TODO: enviar email de verificación con Resend
+    // Generar token de verificación (expira en 24hs)
+    const verification_token = randomBytes(32).toString('hex');
+    const expires = new Date();
+    expires.setHours(expires.getHours() + 24);
+
+    await this.userRepo.update(user.id, {
+      verification_token,
+      verification_token_expires_at: expires,
+    });
+
+    await this.emailService.sendVerificationEmail(user.email, verification_token);
+
     this.logger.log(`Docente registrado: ${user.email}`);
 
     return {
@@ -168,7 +188,34 @@ export class AuthService {
 
     await this.parentRepo.save(profile);
 
-    // TODO: enviar email de confirmación de vinculación
+    // Obtener el perfil del alumno para crear el vínculo pendiente
+    const studentProfile = await this.studentRepo.findOne({
+      where: { user_id: studentUser.id },
+    });
+
+    if (studentProfile) {
+      const confirmation_token = randomBytes(32).toString('hex');
+      const expires = new Date();
+      expires.setHours(expires.getHours() + 48);
+
+      const link = this.parentStudentRepo.create({
+        parent_id: profile.id,
+        student_id: studentProfile.id,
+        is_confirmed: false,
+        confirmation_token,
+        confirmation_token_expires_at: expires,
+      });
+
+      await this.parentStudentRepo.save(link);
+
+      await this.emailService.sendParentLinkConfirmation(
+        studentUser.email,
+        `${dto.first_name} ${dto.last_name}`,
+        studentProfile.alias,
+        confirmation_token,
+      );
+    }
+
     this.logger.log(`Padre registrado: ${user.email} → alumno: ${dto.student_email}`);
 
     return {
@@ -285,9 +332,31 @@ export class AuthService {
   // ─────────────────────────────────────────────────
 
   async verifyEmail(token: string) {
-    // TODO: cuando se implemente Resend, verificar el token
-    // Por ahora placeholder
-    throw new BadRequestException('Funcionalidad de verificación de email pendiente de implementar con Resend.');
+    const user = await this.userRepo.findOne({
+      where: { verification_token: token },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Token de verificación inválido.');
+    }
+
+    if (user.is_verified) {
+      return { message: 'Tu cuenta ya estaba verificada.' };
+    }
+
+    if (user.verification_token_expires_at < new Date()) {
+      throw new BadRequestException('El token de verificación expiró. Solicitá uno nuevo.');
+    }
+
+    await this.userRepo.update(user.id, {
+      is_verified: true,
+      verification_token: undefined,
+      verification_token_expires_at: undefined,
+    });
+
+    this.logger.log(`Email verificado: ${user.email}`);
+
+    return { message: '¡Email verificado! Ya podés iniciar sesión.' };
   }
 
   async logout(userId: string) {

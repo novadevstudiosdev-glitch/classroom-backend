@@ -6,6 +6,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { EmailModule } from '../email/email.module';
 
 // Strategies
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -19,6 +20,7 @@ import { StudentProfile } from '../students/entities/student-profile.entity';
 import { ParentProfile } from '../parents/entities/parent-profile.entity';
 import { Classroom } from '../classrooms/entities/classroom.entity';
 import { ClassroomStudent } from '../classrooms/entities/classroom-student.entity';
+import { ParentStudent } from '../parents/entities/parent-student.entity';
 
 @Module({
   imports: [
@@ -33,7 +35,8 @@ import { ClassroomStudent } from '../classrooms/entities/classroom-student.entit
       }),
     }),
 
-    TypeOrmModule.forFeature([User, TeacherProfile, StudentProfile, ParentProfile, Classroom, ClassroomStudent]),
+    TypeOrmModule.forFeature([User, TeacherProfile, StudentProfile, ParentProfile, Classroom, ClassroomStudent, ParentStudent]),
+    EmailModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, JwtRefreshStrategy, GoogleStrategy],
