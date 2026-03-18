@@ -29,7 +29,7 @@ export class LessonAssignment {
   classroom: Classroom;
 
   @Column({ nullable: true, type: 'timestamptz' })
-  due_date: Date;
+  due_date: Date | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   assigned_at: Date;

@@ -31,14 +31,7 @@ export class EmailService {
     const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
     const verificationUrl = `${frontendUrl}/auth/verify-email?token=${token}`;
 
-    if (this.configService.get<string>('NODE_ENV') !== 'production') {
-      this.logger.warn(`[DEV] Email de verificación para ${to}`);
-      this.logger.warn(`[DEV] URL: ${verificationUrl}`);
-      this.logger.warn(`[DEV] Token: ${token}`);
-      return;
-    }
-
-    const result = await this.resend.emails.send({
+    await this.resend.emails.send({
       from: this.fromAddress,
       to,
       subject: 'Verifica tu cuenta en NovaDev Studios!',
@@ -59,8 +52,7 @@ export class EmailService {
       `,
     });
 
-    this.logger.log(`Resend response: ${JSON.stringify(result)}`);
-    this.logger.log(`Email de verificación enviado a: ${to}`);
+    this.logger.log(`Email de verificacion enviado a: ${to}`);
   }
 
   async sendParentLinkConfirmation(to: string, parentName: string, studentAlias: string, token: string): Promise<void> {
