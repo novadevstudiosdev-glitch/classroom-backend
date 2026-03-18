@@ -85,10 +85,10 @@ export class AuthService {
 
     await this.teacherRepo.save(profile);
 
-    // Generar token de verificación (expira en 24hs)
-    const verification_token = randomBytes(32).toString('hex');
-    const expires = new Date();
-    expires.setHours(expires.getHours() + 24);
+    // Generar token de verificacion (expira en 24hs)
+    const { token: verification_token, expires } = this.buildVerificationToken(24);
+
+
 
     await this.userRepo.update(user.id, {
       verification_token,
@@ -100,7 +100,7 @@ export class AuthService {
     this.logger.log(`Docente registrado: ${user.email}`);
 
     return {
-      message: 'Verificá tu email para activar tu cuenta.',
+      message: 'Verifica tu email para activar tu cuenta.',
       user_id: user.id,
       profile_id: profile.id,
     };
@@ -188,6 +188,17 @@ export class AuthService {
 
     await this.parentRepo.save(profile);
 
+    // Generar token de verificacion para el padre (expira en 24hs)
+    const { token: verification_token, expires } = this.buildVerificationToken(24);
+
+    await this.userRepo.update(user.id, {
+      verification_token,
+      verification_token_expires_at: expires,
+    });
+
+    await this.emailService.sendVerificationEmail(user.email, verification_token);
+
+
     // Obtener el perfil del alumno para crear el vínculo pendiente
     const studentProfile = await this.studentRepo.findOne({
       where: { user_id: studentUser.id },
@@ -219,7 +230,7 @@ export class AuthService {
     this.logger.log(`Padre registrado: ${user.email} → alumno: ${dto.student_email}`);
 
     return {
-      message: 'Cuenta creada. Verificá tu email y confirmá la vinculación con tu hijo.',
+      message: 'Cuenta creada. Verifica tu email y confirma la vinculacion con tu hijo.',
       user_id: user.id,
       profile_id: profile.id,
     };
@@ -328,6 +339,25 @@ export class AuthService {
   }
 
   // ─────────────────────────────────────────────────
+  async resendVerificationEmail(email: string) {
+    const user = await this.userRepo.findOne({ where: { email } });
+
+    if (!user || user.deleted_at || user.is_verified) {
+      return { message: 'Si el email existe y no esta verificado, enviaremos un link.' };
+    }
+
+    const { token: verification_token, expires } = this.buildVerificationToken(24);
+
+    await this.userRepo.update(user.id, {
+      verification_token,
+      verification_token_expires_at: expires,
+    });
+
+    await this.emailService.sendVerificationEmail(user.email, verification_token);
+
+    return { message: 'Si el email existe y no esta verificado, enviaremos un link.' };
+  }
+
   // VERIFY EMAIL
   // ─────────────────────────────────────────────────
 
@@ -368,6 +398,13 @@ export class AuthService {
   // ─────────────────────────────────────────────────
   // HELPERS PRIVADOS
   // ─────────────────────────────────────────────────
+
+  private buildVerificationToken(hours: number) {
+    const token = randomBytes(32).toString('hex');
+    const expires = new Date();
+    expires.setHours(expires.getHours() + hours);
+    return { token, expires };
+  }
 
   private async checkEmailAvailable(email: string) {
     const exists = await this.userRepo.findOne({ where: { email } });
