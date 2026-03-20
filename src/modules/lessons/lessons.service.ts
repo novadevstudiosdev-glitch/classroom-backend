@@ -64,6 +64,7 @@ export class LessonsService {
     const qb = this.lessonRepo
       .createQueryBuilder('lesson')
       .where('lesson.teacher_id = :teacher_id', { teacher_id })
+      .andWhere('lesson.deleted_at IS NULL')
       .orderBy('lesson.created_at', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);

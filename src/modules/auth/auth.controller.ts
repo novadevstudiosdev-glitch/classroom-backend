@@ -144,7 +144,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Cerrar sesión e invalidar refresh token' })
   async logout(@CurrentUser() user: any) {
-    return this.authService.logout(user.id);
+    return this.authService.logout(user.sub);
   }
 
   // ─────────────────────────────────────────────────

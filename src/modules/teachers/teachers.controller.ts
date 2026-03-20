@@ -4,10 +4,12 @@ import { TeachersService } from './teachers.service';
 import { UpdateTeacherDto } from './dto/update-teacher.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Teachers')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@Roles('teacher')
 @Controller('teachers')
 export class TeachersController {
   constructor(private readonly teachersService: TeachersService) {}

@@ -3,10 +3,12 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ParentsService } from './parents.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Parents')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@Roles('parent')
 @Controller('parents')
 export class ParentsController {
   constructor(private readonly parentsService: ParentsService) {}

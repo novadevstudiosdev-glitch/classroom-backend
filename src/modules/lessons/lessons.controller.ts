@@ -25,10 +25,12 @@ import { AssignLessonDto } from './dto/assign-lesson.dto';
 import { ListLessonsDto } from './dto/list-lessons.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Lessons')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@Roles('teacher')
 @Controller('lessons')
 export class LessonsController {
   constructor(private readonly lessonsService: LessonsService) {}

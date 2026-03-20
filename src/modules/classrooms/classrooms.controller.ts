@@ -25,7 +25,7 @@ export class ClassroomsController {
   @ApiResponse({ status: 201, description: 'Clase creada con su código de invitación.' })
   @ApiResponse({ status: 403, description: 'Límite de clases del plan gratuito alcanzado.' })
   create(@CurrentUser() user: any, @Body() dto: CreateClassroomDto) {
-    return this.classroomsService.create(user.id, dto);
+    return this.classroomsService.create(user.sub, dto);
   }
 
   @Get()
@@ -38,7 +38,7 @@ export class ClassroomsController {
     description: 'Si es true, devuelve las clases archivadas',
   })
   findAll(@CurrentUser() user: any, @Query('archived') archived?: string) {
-    return this.classroomsService.findAllByTeacher(user.id, archived === 'true');
+    return this.classroomsService.findAllByTeacher(user.sub, archived === 'true');
   }
 
   @Get('my-classes')
@@ -57,7 +57,7 @@ export class ClassroomsController {
   @ApiResponse({ status: 404, description: 'Clase no encontrada.' })
   @ApiResponse({ status: 403, description: 'No tenés permiso sobre esta clase.' })
   findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
-    return this.classroomsService.findOne(id, user.id);
+    return this.classroomsService.findOne(id, user.sub);
   }
 
   @Patch(':id')
@@ -65,7 +65,7 @@ export class ClassroomsController {
   @ApiOperation({ summary: 'Actualizar nombre, descripción, nivel o estado de una clase' })
   @ApiParam({ name: 'id', description: 'UUID de la clase' })
   update(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any, @Body() dto: UpdateClassroomDto) {
-    return this.classroomsService.update(id, user.id, dto);
+    return this.classroomsService.update(id, user.sub, dto);
   }
 
   @Delete(':id')
@@ -77,7 +77,7 @@ export class ClassroomsController {
   })
   @ApiParam({ name: 'id', description: 'UUID de la clase' })
   remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
-    return this.classroomsService.remove(id, user.id);
+    return this.classroomsService.remove(id, user.sub);
   }
 
   // ─────────────────────────────────────────────────
@@ -93,7 +93,7 @@ export class ClassroomsController {
   })
   @ApiParam({ name: 'id', description: 'UUID de la clase' })
   regenerateCode(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
-    return this.classroomsService.regenerateInviteCode(id, user.id);
+    return this.classroomsService.regenerateInviteCode(id, user.sub);
   }
 
   @Delete(':id/students/:studentId')
@@ -103,7 +103,7 @@ export class ClassroomsController {
   @ApiParam({ name: 'id', description: 'UUID de la clase' })
   @ApiParam({ name: 'studentId', description: 'UUID del perfil del alumno (student_profile.id)' })
   removeStudent(@Param('id', ParseUUIDPipe) id: string, @Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: any) {
-    return this.classroomsService.removeStudent(id, studentId, user.id);
+    return this.classroomsService.removeStudent(id, studentId, user.sub);
   }
 
   @Get(':id/progress')
@@ -114,6 +114,6 @@ export class ClassroomsController {
   })
   @ApiParam({ name: 'id', description: 'UUID de la clase' })
   getProgress(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
-    return this.classroomsService.getProgress(id, user.id);
+    return this.classroomsService.getProgress(id, user.sub);
   }
 }
