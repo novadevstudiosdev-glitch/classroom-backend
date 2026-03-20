@@ -31,6 +31,8 @@ export class ClassroomsController {
   @Get()
   @Roles('teacher')
   @ApiOperation({ summary: 'Listar todas las clases del docente' })
+  @ApiResponse({ status: 200, description: 'Array de clases del docente con cantidad de alumnos.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
   @ApiQuery({
     name: 'archived',
     required: false,
@@ -44,6 +46,8 @@ export class ClassroomsController {
   @Get('my-classes')
   @Roles('student')
   @ApiOperation({ summary: 'Listar las clases activas del alumno autenticado' })
+  @ApiResponse({ status: 200, description: 'Array de clases a las que pertenece el alumno.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
   findStudentClasses(@CurrentUser() user: any) {
     // El profile_id del alumno viene en el JWT
     return this.classroomsService.findAllByStudent(user.profile_id);
@@ -64,6 +68,11 @@ export class ClassroomsController {
   @Roles('teacher')
   @ApiOperation({ summary: 'Actualizar nombre, descripción, nivel o estado de una clase' })
   @ApiParam({ name: 'id', description: 'UUID de la clase' })
+  @ApiResponse({ status: 200, description: 'Clase actualizada.' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  @ApiResponse({ status: 403, description: 'No tenés permiso sobre esta clase.' })
+  @ApiResponse({ status: 404, description: 'Clase no encontrada.' })
   update(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any, @Body() dto: UpdateClassroomDto) {
     return this.classroomsService.update(id, user.sub, dto);
   }
@@ -76,6 +85,10 @@ export class ClassroomsController {
     description: 'No elimina físicamente la clase ni el historial de alumnos.',
   })
   @ApiParam({ name: 'id', description: 'UUID de la clase' })
+  @ApiResponse({ status: 200, description: 'Clase archivada correctamente.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  @ApiResponse({ status: 403, description: 'No tenés permiso sobre esta clase.' })
+  @ApiResponse({ status: 404, description: 'Clase no encontrada.' })
   remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
     return this.classroomsService.remove(id, user.sub);
   }
@@ -92,6 +105,10 @@ export class ClassroomsController {
     description: 'El código anterior queda inválido. Útil si fue compartido por error.',
   })
   @ApiParam({ name: 'id', description: 'UUID de la clase' })
+  @ApiResponse({ status: 200, description: 'Retorna el nuevo invite_code.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  @ApiResponse({ status: 403, description: 'No tenés permiso sobre esta clase.' })
+  @ApiResponse({ status: 404, description: 'Clase no encontrada.' })
   regenerateCode(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
     return this.classroomsService.regenerateInviteCode(id, user.sub);
   }
@@ -102,6 +119,10 @@ export class ClassroomsController {
   @ApiOperation({ summary: 'Remover un alumno de la clase' })
   @ApiParam({ name: 'id', description: 'UUID de la clase' })
   @ApiParam({ name: 'studentId', description: 'UUID del perfil del alumno (student_profile.id)' })
+  @ApiResponse({ status: 200, description: 'Alumno removido de la clase.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  @ApiResponse({ status: 403, description: 'No tenés permiso sobre esta clase.' })
+  @ApiResponse({ status: 404, description: 'Clase o alumno no encontrado.' })
   removeStudent(@Param('id', ParseUUIDPipe) id: string, @Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: any) {
     return this.classroomsService.removeStudent(id, studentId, user.sub);
   }
@@ -113,6 +134,10 @@ export class ClassroomsController {
     description: 'Placeholder — se completa al implementar el módulo lessons/progress.',
   })
   @ApiParam({ name: 'id', description: 'UUID de la clase' })
+  @ApiResponse({ status: 200, description: 'Matriz de progreso por alumno y lección.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  @ApiResponse({ status: 403, description: 'No tenés permiso sobre esta clase.' })
+  @ApiResponse({ status: 404, description: 'Clase no encontrada.' })
   getProgress(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
     return this.classroomsService.getProgress(id, user.sub);
   }

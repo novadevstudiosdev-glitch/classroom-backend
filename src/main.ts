@@ -26,6 +26,7 @@ async function bootstrap() {
     .setTitle('NovaDev API')
     .setDescription('Educational SaaS Platform API')
     .setVersion('1.0')
+    .addBearerAuth()
     .build();
 
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);

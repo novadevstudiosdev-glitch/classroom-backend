@@ -1,6 +1,6 @@
-import { Injectable, ConflictException, UnauthorizedException, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, ConflictException, UnauthorizedException, NotFoundException, BadRequestException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
@@ -54,6 +54,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private emailService: EmailService,
+    private dataSource: DataSource,
   ) {}
 
   // ─────────────────────────────────────────────────
@@ -64,50 +65,44 @@ export class AuthService {
     await this.checkEmailAvailable(dto.email);
 
     const password_hash = await bcrypt.hash(dto.password, 12);
-
-    const user = this.userRepo.create({
-      email: dto.email,
-      password_hash,
-      role: 'teacher',
-      is_verified: false,
-    });
-
-    await this.userRepo.save(user);
-
-    const profile = this.teacherRepo.create({
-      user_id: user.id,
-      first_name: dto.first_name,
-      last_name: dto.last_name,
-      country: dto.country,
-      plan_type: 'free',
-      subscription_status: 'inactive',
-    });
-
-    await this.teacherRepo.save(profile);
-
-    // Generar token de verificacion (expira en 24hs)
     const { token: verification_token, expires } = this.buildVerificationToken(24);
 
+    const { userId, profileId } = await this.dataSource.transaction(async (manager) => {
+      const user = manager.create(User, {
+        email: dto.email,
+        password_hash,
+        role: 'teacher',
+        is_verified: false,
+        verification_token,
+        verification_token_expires_at: expires,
+      });
+      await manager.save(user);
 
+      const profile = manager.create(TeacherProfile, {
+        user_id: user.id,
+        first_name: dto.first_name,
+        last_name: dto.last_name,
+        country: dto.country,
+        plan_type: 'free',
+        subscription_status: 'inactive',
+      });
+      await manager.save(profile);
 
-    await this.userRepo.update(user.id, {
-      verification_token,
-      verification_token_expires_at: expires,
+      return { userId: user.id, profileId: profile.id };
     });
 
-    await this.emailService.sendVerificationEmail(user.email, verification_token);
+    await this.emailService.sendVerificationEmail(dto.email, verification_token);
 
-    this.logger.log(`Docente registrado: ${user.email}`);
+    this.logger.log(`Docente registrado: ${dto.email}`);
 
     return {
       message: 'Verifica tu email para activar tu cuenta.',
-      user_id: user.id,
-      profile_id: profile.id,
+      user_id: userId,
+      profile_id: profileId,
     };
   }
 
   async registerStudent(dto: RegisterStudentDto) {
-    // Validar código de invitación
     const classroom = await this.classroomRepo.findOne({
       where: { invite_code: dto.invite_code.toUpperCase(), is_archived: false },
     });
@@ -120,45 +115,44 @@ export class AuthService {
 
     const password_hash = await bcrypt.hash(dto.password, 12);
 
-    const user = this.userRepo.create({
-      email: dto.email,
-      password_hash,
-      role: 'student',
-      is_verified: true, // Los alumnos no necesitan verificar email en el MVP
+    const { userId, profileId } = await this.dataSource.transaction(async (manager) => {
+      const user = manager.create(User, {
+        email: dto.email,
+        password_hash,
+        role: 'student',
+        is_verified: true,
+      });
+      await manager.save(user);
+
+      const profile = manager.create(StudentProfile, {
+        user_id: user.id,
+        alias: dto.alias,
+        avatar_id: dto.avatar_id,
+        xp_total: 0,
+        level: 1,
+      });
+      await manager.save(profile);
+
+      const classroomStudent = manager.create(ClassroomStudent, {
+        classroom_id: classroom.id,
+        student_id: profile.id,
+      });
+      await manager.save(classroomStudent);
+
+      return { userId: user.id, profileId: profile.id };
     });
 
-    await this.userRepo.save(user);
-
-    const profile = this.studentRepo.create({
-      user_id: user.id,
-      alias: dto.alias,
-      avatar_id: dto.avatar_id,
-      xp_total: 0,
-      level: 1,
-    });
-
-    await this.studentRepo.save(profile);
-
-    // Unir al alumno a la clase
-    const classroomStudent = this.classroomStudentRepo.create({
-      classroom_id: classroom.id,
-      student_id: profile.id,
-    });
-
-    await this.classroomStudentRepo.save(classroomStudent);
-
-    this.logger.log(`Alumno registrado: ${user.email} → clase: ${classroom.name}`);
+    this.logger.log(`Alumno registrado: ${dto.email} → clase: ${classroom.name}`);
 
     return {
       message: '¡Cuenta creada! Ya sos parte de la clase.',
-      user_id: user.id,
-      profile_id: profile.id,
+      user_id: userId,
+      profile_id: profileId,
       classroom_id: classroom.id,
     };
   }
 
   async registerParent(dto: RegisterParentDto) {
-    // Verificar que el alumno a vincular existe
     const studentUser = await this.userRepo.findOne({
       where: { email: dto.student_email, role: 'student' },
     });
@@ -167,72 +161,67 @@ export class AuthService {
       throw new NotFoundException('No se encontró un alumno con ese email.');
     }
 
-    await this.checkEmailAvailable(dto.email);
-
-    const password_hash = await bcrypt.hash(dto.password, 12);
-
-    const user = this.userRepo.create({
-      email: dto.email,
-      password_hash,
-      role: 'parent',
-      is_verified: false,
-    });
-
-    await this.userRepo.save(user);
-
-    const profile = this.parentRepo.create({
-      user_id: user.id,
-      first_name: dto.first_name,
-      last_name: dto.last_name,
-    });
-
-    await this.parentRepo.save(profile);
-
-    // Generar token de verificacion para el padre (expira en 24hs)
-    const { token: verification_token, expires } = this.buildVerificationToken(24);
-
-    await this.userRepo.update(user.id, {
-      verification_token,
-      verification_token_expires_at: expires,
-    });
-
-    await this.emailService.sendVerificationEmail(user.email, verification_token);
-
-
-    // Obtener el perfil del alumno para crear el vínculo pendiente
     const studentProfile = await this.studentRepo.findOne({
       where: { user_id: studentUser.id },
     });
 
-    if (studentProfile) {
-      const confirmation_token = randomBytes(32).toString('hex');
-      const expires = new Date();
-      expires.setHours(expires.getHours() + 48);
+    if (!studentProfile) {
+      throw new NotFoundException('No se encontró un alumno con ese email.');
+    }
 
-      const link = this.parentStudentRepo.create({
+    await this.checkEmailAvailable(dto.email);
+
+    const password_hash = await bcrypt.hash(dto.password, 12);
+    const { token: verification_token, expires } = this.buildVerificationToken(24);
+
+    const confirmation_token = randomBytes(32).toString('hex');
+    const confirmationExpires = new Date();
+    confirmationExpires.setHours(confirmationExpires.getHours() + 48);
+
+    const { userId, profileId } = await this.dataSource.transaction(async (manager) => {
+      const user = manager.create(User, {
+        email: dto.email,
+        password_hash,
+        role: 'parent',
+        is_verified: false,
+        verification_token,
+        verification_token_expires_at: expires,
+      });
+      await manager.save(user);
+
+      const profile = manager.create(ParentProfile, {
+        user_id: user.id,
+        first_name: dto.first_name,
+        last_name: dto.last_name,
+      });
+      await manager.save(profile);
+
+      const link = manager.create(ParentStudent, {
         parent_id: profile.id,
         student_id: studentProfile.id,
         is_confirmed: false,
         confirmation_token,
-        confirmation_token_expires_at: expires,
+        confirmation_token_expires_at: confirmationExpires,
       });
+      await manager.save(link);
 
-      await this.parentStudentRepo.save(link);
+      return { userId: user.id, profileId: profile.id };
+    });
 
-      await this.emailService.sendParentLinkConfirmation(
-        studentUser.email,
-        `${dto.first_name} ${dto.last_name}`,
-        studentProfile.alias,
-        confirmation_token,
-      );
-    }
+    await this.emailService.sendVerificationEmail(dto.email, verification_token);
+    await this.emailService.sendParentLinkConfirmation(
+      studentUser.email,
+      `${dto.first_name} ${dto.last_name}`,
+      studentProfile.alias,
+      confirmation_token,
+    );
 
-    this.logger.log(`Padre registrado: ${user.email} → alumno: ${dto.student_email}`);
+    this.logger.log(`Padre registrado: ${dto.email} → alumno: ${dto.student_email}`);
 
     return {
       message: 'Cuenta creada. Verifica tu email y confirma la vinculacion con tu hijo.',
-      user_id: user.id,
-      profile_id: profile.id,
+      user_id: userId,
+      profile_id: profileId,
     };
   }
 
@@ -417,18 +406,21 @@ export class AuthService {
     switch (user.role) {
       case 'teacher': {
         const profile = await this.teacherRepo.findOne({ where: { user_id: user.id } });
-        return profile?.id ?? '';
+        if (!profile) throw new InternalServerErrorException('Perfil de docente no encontrado para este usuario.');
+        return profile.id;
       }
       case 'student': {
         const profile = await this.studentRepo.findOne({ where: { user_id: user.id } });
-        return profile?.id ?? '';
+        if (!profile) throw new InternalServerErrorException('Perfil de alumno no encontrado para este usuario.');
+        return profile.id;
       }
       case 'parent': {
         const profile = await this.parentRepo.findOne({ where: { user_id: user.id } });
-        return profile?.id ?? '';
+        if (!profile) throw new InternalServerErrorException('Perfil de padre no encontrado para este usuario.');
+        return profile.id;
       }
       default:
-        return '';
+        throw new InternalServerErrorException(`Rol desconocido: ${user.role}`);
     }
   }
 

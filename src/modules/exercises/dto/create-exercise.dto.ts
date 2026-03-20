@@ -64,7 +64,7 @@ export class CreateExerciseDto {
 
   @ApiProperty({
     enum: ['multiple_choice', 'fill_blank', 'true_false', 'match_columns', 'order_items'],
-    example: 'multiple_choice',
+    enumName: 'ExerciseType',
   })
   @IsEnum(['multiple_choice', 'fill_blank', 'true_false', 'match_columns', 'order_items'])
   type: ExerciseType;
