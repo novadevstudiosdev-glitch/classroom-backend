@@ -1,5 +1,5 @@
-import { IsEmail, IsString, MinLength, MaxLength, Length } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsEmail, IsString, IsOptional, MinLength, MaxLength, Length } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterStudentDto {
   @ApiProperty({ example: 'Sofía' })
@@ -22,10 +22,11 @@ export class RegisterStudentDto {
   @IsString()
   avatar_id: string;
 
-  @ApiProperty({ example: 'ABC123' })
+  @ApiPropertyOptional({ example: 'ABC123', description: 'Código de invitación de 6 caracteres. Si se omite, el alumno se registra sin clase y puede unirse después.' })
+  @IsOptional()
   @IsString()
   @Length(6, 6)
-  invite_code: string;
+  invite_code?: string;
 
   @ApiProperty({ example: 'TOKEN_DE_RECAPTCHA' })
   @IsString()

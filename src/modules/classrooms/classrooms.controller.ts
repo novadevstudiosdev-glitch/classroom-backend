@@ -4,6 +4,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam }
 import { ClassroomsService } from './classrooms.service';
 import { CreateClassroomDto } from './dto/create-classroom.dto';
 import { UpdateClassroomDto } from './dto/update-classroom.dto';
+import { JoinClassroomDto } from './dto/join-classroom.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -13,7 +14,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 @UseGuards(JwtAuthGuard)
 @Controller('classrooms')
 export class ClassroomsController {
-  constructor(private readonly classroomsService: ClassroomsService) {}
+  constructor(private readonly classroomsService: ClassroomsService) {} 
 
   // ─────────────────────────────────────────────────
   // DOCENTE — CRUD de sus clases
@@ -49,8 +50,19 @@ export class ClassroomsController {
   @ApiResponse({ status: 200, description: 'Array de clases a las que pertenece el alumno.' })
   @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
   findStudentClasses(@CurrentUser() user: any) {
-    // El profile_id del alumno viene en el JWT
     return this.classroomsService.findAllByStudent(user.profile_id);
+  }
+
+  @Post('join')
+  @Roles('student')
+  @ApiOperation({ summary: 'Unirse a una clase con código de invitación', description: 'El alumno ya registrado ingresa el invite_code que le dio el docente para unirse a su clase.' })
+  @ApiResponse({ status: 201, description: 'Alumno unido a la clase correctamente.' })
+  @ApiResponse({ status: 400, description: 'Código con formato inválido.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  @ApiResponse({ status: 404, description: 'Código de invitación inválido o clase no encontrada.' })
+  @ApiResponse({ status: 409, description: 'El alumno ya pertenece a esta clase.' })
+  joinClassroom(@CurrentUser() user: any, @Body() dto: JoinClassroomDto) {
+    return this.classroomsService.joinClassroom(user.profile_id, dto.invite_code);
   }
 
   @Get(':id')

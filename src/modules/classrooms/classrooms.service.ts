@@ -18,7 +18,7 @@ export class ClassroomsService {
 
   constructor(
     @InjectRepository(Classroom)
-    private classroomRepo: Repository<Classroom>,
+    private classroomRepo: Repository<Classroom>, 
 
     @InjectRepository(ClassroomStudent)
     private classroomStudentRepo: Repository<ClassroomStudent>,
@@ -265,6 +265,43 @@ export class ClassroomsService {
       lessons: [], // Se completará con el módulo lessons
       progress: [], // Se completará con el módulo progress
       note: 'La matriz de progreso estará disponible cuando se implemente el módulo lessons.',
+    };
+  }
+
+  // ─────────────────────────────────────────────────
+  // ALUMNO — UNIRSE A UNA CLASE CON CÓDIGO
+  // ─────────────────────────────────────────────────
+
+  async joinClassroom(studentProfileId: string, invite_code: string) {
+    const classroom = await this.classroomRepo.findOne({
+      where: { invite_code: invite_code.toUpperCase(), is_archived: false },
+    });
+
+    if (!classroom) {
+      throw new NotFoundException('Código de invitación inválido o la clase no existe.');
+    }
+
+    const alreadyJoined = await this.classroomStudentRepo.findOne({
+      where: { classroom_id: classroom.id, student_id: studentProfileId },
+    });
+
+    if (alreadyJoined) {
+      throw new ConflictException('Ya sos parte de esta clase.');
+    }
+
+    const classroomStudent = this.classroomStudentRepo.create({
+      classroom_id: classroom.id,
+      student_id: studentProfileId,
+    });
+
+    await this.classroomStudentRepo.save(classroomStudent);
+
+    this.logger.log(`Alumno ${studentProfileId} se unió a la clase ${classroom.name}`);
+
+    return {
+      message: `¡Te uniste a ${classroom.name}!`,
+      classroom_id: classroom.id,
+      name: classroom.name,
     };
   }
 

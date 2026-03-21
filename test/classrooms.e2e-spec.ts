@@ -11,14 +11,13 @@ const STUDENT_PASSWORD = 'Test1234!';
 describe('Classrooms (e2e)', () => {
   let app: INestApplication;
   let teacherToken: string;
-  let studentToken: string;
+  let studentToken: string; 
   let classroomId: string;
   let inviteCode: string;
 
-  beforeAll(async () => {
+  beforeAll(async () => { 
     app = await createTestApp();
 
-    // Registrar y verificar docente
     await request(app.getHttpServer())
       .post('/auth/register/teacher')
       .send({ email: TEACHER_EMAIL, password: TEACHER_PASSWORD, first_name: 'Teacher', last_name: 'Clases', country: 'AR', recaptcha_token: 'test-token' });
@@ -126,9 +125,9 @@ describe('Classrooms (e2e)', () => {
     inviteCode = newCode; // actualizar para usar el código nuevo
   });
 
-  // ─── REGISTER STUDENT CON INVITE CODE ────────────────
+  // ─── REGISTER STUDENT SIN INVITE CODE ───────────────
 
-  it('POST /auth/register/student → 201 con código válido', async () => {
+  it('POST /auth/register/student → 201 sin código (registro libre)', async () => {
     const res = await request(app.getHttpServer())
       .post('/auth/register/student')
       .send({
@@ -136,13 +135,12 @@ describe('Classrooms (e2e)', () => {
         password: STUDENT_PASSWORD,
         alias: 'TestAlumno',
         avatar_id: 'avatar_01',
-        invite_code: inviteCode,
         recaptcha_token: 'test-token',
       })
       .expect(201);
 
     expect(res.body.data).toHaveProperty('user_id');
-    expect(res.body.data.classroom_id).toBe(classroomId);
+    expect(res.body.data.classroom_id).toBeUndefined();
   });
 
   it('POST /auth/register/student → 404 con código inválido', async () => {
@@ -159,14 +157,42 @@ describe('Classrooms (e2e)', () => {
       .expect(404);
   });
 
-  // ─── STUDENT VE SUS CLASES ───────────────────────────
+  // ─── STUDENT SE UNE CON CÓDIGO ────────────────────────
 
-  it('GET /classrooms/my-classes → 200 alumno ve su clase', async () => {
+  it('POST /classrooms/join → 201 alumno se une con código', async () => {
     const studentLogin = await request(app.getHttpServer())
       .post('/auth/login')
       .send({ email: STUDENT_EMAIL, password: STUDENT_PASSWORD });
     studentToken = studentLogin.body.data.access_token;
 
+    const res = await request(app.getHttpServer())
+      .post('/classrooms/join')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ invite_code: inviteCode })
+      .expect(201);
+
+    expect(res.body.data.classroom_id).toBe(classroomId);
+  });
+
+  it('POST /classrooms/join → 409 si ya está en la clase', async () => {
+    await request(app.getHttpServer())
+      .post('/classrooms/join')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ invite_code: inviteCode })
+      .expect(409);
+  });
+
+  it('POST /classrooms/join → 404 con código inválido', async () => {
+    await request(app.getHttpServer())
+      .post('/classrooms/join')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ invite_code: 'XXXXXX' })
+      .expect(404);
+  });
+
+  // ─── STUDENT VE SUS CLASES ───────────────────────────
+
+  it('GET /classrooms/my-classes → 200 alumno ve su clase', async () => {
     const res = await request(app.getHttpServer())
       .get('/classrooms/my-classes')
       .set('Authorization', `Bearer ${studentToken}`)

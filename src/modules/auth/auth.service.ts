@@ -103,12 +103,16 @@ export class AuthService {
   }
 
   async registerStudent(dto: RegisterStudentDto) {
-    const classroom = await this.classroomRepo.findOne({
-      where: { invite_code: dto.invite_code.toUpperCase(), is_archived: false },
-    });
+    let classroom: Classroom | null = null;
 
-    if (!classroom) {
-      throw new NotFoundException('Código de invitación inválido o la clase no existe.');
+    if (dto.invite_code) {
+      classroom = await this.classroomRepo.findOne({
+        where: { invite_code: dto.invite_code.toUpperCase(), is_archived: false },
+      });
+
+      if (!classroom) {
+        throw new NotFoundException('Código de invitación inválido o la clase no existe.');
+      }
     }
 
     await this.checkEmailAvailable(dto.email);
@@ -133,22 +137,24 @@ export class AuthService {
       });
       await manager.save(profile);
 
-      const classroomStudent = manager.create(ClassroomStudent, {
-        classroom_id: classroom.id,
-        student_id: profile.id,
-      });
-      await manager.save(classroomStudent);
+      if (classroom) {
+        const classroomStudent = manager.create(ClassroomStudent, {
+          classroom_id: classroom.id,
+          student_id: profile.id,
+        });
+        await manager.save(classroomStudent);
+      }
 
       return { userId: user.id, profileId: profile.id };
     });
 
-    this.logger.log(`Alumno registrado: ${dto.email} → clase: ${classroom.name}`);
+    this.logger.log(`Alumno registrado: ${dto.email}${classroom ? ` → clase: ${classroom.name}` : ' (sin clase)'}`);
 
     return {
-      message: '¡Cuenta creada! Ya sos parte de la clase.',
+      message: classroom ? '¡Cuenta creada! Ya sos parte de la clase.' : '¡Cuenta creada! Pedile el código a tu docente para unirte a una clase.',
       user_id: userId,
       profile_id: profileId,
-      classroom_id: classroom.id,
+      ...(classroom && { classroom_id: classroom.id }),
     };
   }
 
