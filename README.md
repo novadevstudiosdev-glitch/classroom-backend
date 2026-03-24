@@ -37,7 +37,7 @@ npm run start:dev
 
 La API queda disponible en `http://localhost:3000/api`
 Swagger en `http://localhost:3000/api/docs`
-Si configurÃ¡s `SWAGGER_PASSWORD`, Swagger queda protegido con Basic Auth (usuario `SWAGGER_USER`, por defecto `swagger`).
+Si configurás `SWAGGER_PASSWORD`, Swagger queda protegido con Basic Auth (usuario `SWAGGER_USER`, por defecto `swagger`).
 
 ## Variables de entorno
 
@@ -90,7 +90,7 @@ npm run seed:minigames # Seed inicial de minijuegos
 
 ## Tests
 
-11 suites E2E, 123 tests. Corren contra la DB real (sin mocks).
+12 suites E2E, 140 tests. Corren contra la DB real (sin mocks).
 
 ```bash
 npm run test:e2e

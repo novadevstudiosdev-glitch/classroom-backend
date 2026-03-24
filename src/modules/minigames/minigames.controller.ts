@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
 import { MinigamesService } from './minigames.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import {
@@ -38,7 +38,7 @@ export class MinigamesController {
   @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
   @ApiResponse({ status: 403, description: 'Solo docentes y alumnos pueden acceder.' })
   @ApiResponse({ status: 404, description: 'Minijuego no encontrado o inactivo.' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.minigamesService.findOne(id);
   }
 }

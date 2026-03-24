@@ -11,6 +11,7 @@ jobs:
   test:
     name: Lint, Build & E2E Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout código
@@ -23,7 +24,7 @@ jobs:
           cache: 'npm'
 
       - name: Instalar dependencias
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Lint
         run: npm run lint

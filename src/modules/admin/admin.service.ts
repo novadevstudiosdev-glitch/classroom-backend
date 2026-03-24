@@ -108,6 +108,17 @@ export class AdminService {
     };
   }
 
+  async getUser(userId: string) {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      withDeleted: true,
+      select: ['id', 'email', 'role', 'is_verified', 'created_at', 'deleted_at'],
+    });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado.');
+    return user;
+  }
+
   async suspendUser(userId: string) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
 
@@ -133,6 +144,94 @@ export class AdminService {
 
     this.logger.log(`Admin restauró usuario: ${user.email}`);
     return { message: `Usuario ${user.email} restaurado correctamente.` };
+  }
+
+  async deleteUser(userId: string) {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      withDeleted: true,
+    });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado.');
+
+    await this.userRepo.delete(userId);
+
+    this.logger.log(`Admin eliminó permanentemente usuario: ${user.email}`);
+    return { message: `Usuario ${user.email} eliminado permanentemente.` };
+  }
+
+  // ─────────────────────────────────────────────────
+  // MÉTRICAS DE ACTIVIDAD
+  // ─────────────────────────────────────────────────
+
+  async getMetrics() {
+    const [sessions7, sessions30, completions7, completions30, topStudents, topTeachers] = await Promise.all([
+      // Sesiones últimos 7 días
+      this.dataSource.query(`
+        SELECT COUNT(*)::int AS total
+        FROM sessions
+        WHERE started_at >= NOW() - INTERVAL '7 days'
+      `),
+
+      // Sesiones últimos 30 días
+      this.dataSource.query(`
+        SELECT COUNT(*)::int AS total
+        FROM sessions
+        WHERE started_at >= NOW() - INTERVAL '30 days'
+      `),
+
+      // Lecciones completadas últimos 7 días
+      this.dataSource.query(`
+        SELECT COUNT(*)::int AS total
+        FROM lesson_progress
+        WHERE status = 'completed'
+        AND completed_at >= NOW() - INTERVAL '7 days'
+      `),
+
+      // Lecciones completadas últimos 30 días
+      this.dataSource.query(`
+        SELECT COUNT(*)::int AS total
+        FROM lesson_progress
+        WHERE status = 'completed'
+        AND completed_at >= NOW() - INTERVAL '30 days'
+      `),
+
+      // Top 5 alumnos por XP
+      this.dataSource.query(`
+        SELECT sp.alias, sp.xp_total, sp.level, u.email
+        FROM student_profiles sp
+        JOIN users u ON u.id::text = sp.user_id::text
+        ORDER BY sp.xp_total DESC
+        LIMIT 5
+      `),
+
+      // Top 5 docentes por cantidad de clases activas
+      this.dataSource.query(`
+        SELECT
+          tp.first_name || ' ' || tp.last_name AS name,
+          u.email,
+          COUNT(c.id)::int AS active_classrooms
+        FROM teacher_profiles tp
+        JOIN users u ON u.id::text = tp.user_id::text
+        LEFT JOIN classrooms c ON c.teacher_id::text = tp.id::text AND c.is_archived = false
+        GROUP BY tp.id, tp.first_name, tp.last_name, u.email
+        ORDER BY active_classrooms DESC
+        LIMIT 5
+      `),
+    ]);
+
+    return {
+      sessions: {
+        last_7_days: sessions7[0].total,
+        last_30_days: sessions30[0].total,
+      },
+      lesson_completions: {
+        last_7_days: completions7[0].total,
+        last_30_days: completions30[0].total,
+      },
+      top_students: topStudents,
+      top_teachers: topTeachers,
+    };
   }
 
   // ─────────────────────────────────────────────────
