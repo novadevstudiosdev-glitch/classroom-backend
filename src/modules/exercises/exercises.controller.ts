@@ -1,29 +1,12 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  UseGuards,
-  HttpCode,
-  HttpStatus,
-  ParseUUIDPipe,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-  ApiBody,
-} from '@nestjs/swagger';
+import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, HttpCode, HttpStatus, ParseUUIDPipe } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiParam } from '@nestjs/swagger';
 import { ExercisesService } from './exercises.service';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { AnswerExerciseDto } from './dto/answer-exercise.dto';
 
 @ApiTags('Exercises')
 @ApiBearerAuth()
@@ -75,7 +58,12 @@ export class ExercisesController {
           type: 'match_columns',
           title: 'Unir con su traducción',
           order: 3,
-          config_json: { pairs: [{ left: 'Perro', right: 'Dog' }, { left: 'Gato', right: 'Cat' }] },
+          config_json: {
+            pairs: [
+              { left: 'Perro', right: 'Dog' },
+              { left: 'Gato', right: 'Cat' },
+            ],
+          },
         },
       },
       order_items: {
@@ -100,11 +88,66 @@ export class ExercisesController {
   @Get(':id')
   @ApiOperation({ summary: 'Obtener un ejercicio por ID' })
   @ApiResponse({ status: 404, description: 'Ejercicio no encontrado.' })
-  async findOne(
-    @CurrentUser() user: any,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
+  async findOne(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.exercisesService.findOne(user.sub, id);
+  }
+
+  @Post(':id/answer')
+  @Roles('student') // solo alumnos responden ejercicios
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Enviar respuesta a un ejercicio',
+    description: 'El alumno envía su respuesta. El backend devuelve si es correcta, feedback y la solución correcta.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID del ejercicio' })
+  @ApiBody({
+    description: 'Estructura de answer según el tipo de ejercicio:',
+    examples: {
+      multiple_choice: {
+        summary: 'Opción múltiple',
+        value: { answer: { selected_index: 2 } },
+      },
+      fill_blank: {
+        summary: 'Completar espacios',
+        value: { answer: { answers: ['azul', 'amarillo'] } },
+      },
+      true_false: {
+        summary: 'Verdadero o Falso',
+        value: { answer: { answer: false } },
+      },
+      match_columns: {
+        summary: 'Unir columnas',
+        value: {
+          answer: {
+            pairs: [
+              { left_index: 0, right_index: 1 },
+              { left_index: 1, right_index: 0 },
+            ],
+          },
+        },
+      },
+      order_items: {
+        summary: 'Ordenar elementos',
+        value: { answer: { order: [2, 0, 1] } },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Resultado de la corrección.',
+    schema: {
+      example: {
+        is_correct: true,
+        feedback: '¡Correcto! 🎉',
+        correct_answer: { correct_index: 2, correct_text: '8' },
+        detail: null,
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Formato de respuesta incorrecto para el tipo de ejercicio.' })
+  @ApiResponse({ status: 404, description: 'Ejercicio no encontrado.' })
+  async answer(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AnswerExerciseDto) {
+    return this.exercisesService.answerExercise(id, dto);
   }
 
   @Patch(':id')
@@ -137,7 +180,12 @@ export class ExercisesController {
         summary: 'Unir columnas',
         value: {
           title: 'Nuevo título',
-          config_json: { pairs: [{ left: 'Perro', right: 'Dog' }, { left: 'Gato', right: 'Cat' }] },
+          config_json: {
+            pairs: [
+              { left: 'Perro', right: 'Dog' },
+              { left: 'Gato', right: 'Cat' },
+            ],
+          },
         },
       },
       order_items: {
@@ -155,11 +203,7 @@ export class ExercisesController {
   })
   @ApiResponse({ status: 400, description: 'config_json inválido para el tipo.' })
   @ApiResponse({ status: 404, description: 'Ejercicio no encontrado.' })
-  async update(
-    @CurrentUser() user: any,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateExerciseDto,
-  ) {
+  async update(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateExerciseDto) {
     return this.exercisesService.update(user.sub, id, dto);
   }
 
@@ -167,10 +211,7 @@ export class ExercisesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Eliminar un ejercicio' })
   @ApiResponse({ status: 404, description: 'Ejercicio no encontrado.' })
-  async remove(
-    @CurrentUser() user: any,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
+  async remove(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.exercisesService.remove(user.sub, id);
   }
 }
