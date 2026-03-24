@@ -130,9 +130,9 @@ describe('Admin (e2e)', () => {
     expect(res.body.data.users.every((u: any) => u.role === 'teacher')).toBe(true);
   });
 
-  it('DELETE /admin/users/:id/suspend → 200 suspende usuario', async () => {
+  it('PATCH /admin/users/:id/suspend → 200 suspende usuario', async () => {
     const res = await request(app.getHttpServer())
-      .delete(`/api/admin/users/${teacherUserId}/suspend`)
+      .patch(`/api/admin/users/${teacherUserId}/suspend`)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
 
@@ -148,9 +148,9 @@ describe('Admin (e2e)', () => {
     expect(res.body.data.message).toBeDefined();
   });
 
-  it('DELETE /admin/users/:id/suspend → 404 con id inexistente', async () => {
+  it('PATCH /admin/users/:id/suspend → 404 con id inexistente', async () => {
     await request(app.getHttpServer())
-      .delete('/api/admin/users/00000000-0000-0000-0000-000000000000/suspend')
+      .patch('/api/admin/users/00000000-0000-0000-0000-000000000000/suspend')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(404);
   });
