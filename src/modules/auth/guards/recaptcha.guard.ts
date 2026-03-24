@@ -11,10 +11,11 @@ export class RecaptchaGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     // En desarrollo, saltear la validación si no hay secret key configurada
     const secretKey = this.configService.get<string>('RECAPTCHA_SECRET_KEY');
-    const isDev = this.configService.get<string>('NODE_ENV') === 'development';
+    const env = this.configService.get<string>('NODE_ENV');
+    const isNonProd = env !== 'production';
 
-    if (isDev && !secretKey) {
-      this.logger.warn('reCAPTCHA desactivado en desarrollo (RECAPTCHA_SECRET_KEY no configurada).');
+    if (isNonProd && !secretKey) {
+      this.logger.warn('reCAPTCHA desactivado (RECAPTCHA_SECRET_KEY no configurada).');
       return true;
     }
 

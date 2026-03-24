@@ -4,14 +4,16 @@ import { TypeOrmModuleAsyncOptions, TypeOrmModuleOptions } from '@nestjs/typeorm
 function buildTypeOrmOptions(configService: ConfigService): TypeOrmModuleOptions {
   const databaseUrl = configService.get<string>('database.url');
 
+  const isDevelopment = configService.get<string>('NODE_ENV') !== 'production';
+
   if (databaseUrl) {
     return {
       type: 'postgres',
       url: databaseUrl,
       autoLoadEntities: true,
-      synchronize: false,
+      synchronize: isDevelopment,
       ssl: { rejectUnauthorized: false }, // Requerido por Supabase
-      logging: true,
+      logging: isDevelopment,
     };
   }
 
@@ -29,8 +31,8 @@ function buildTypeOrmOptions(configService: ConfigService): TypeOrmModuleOptions
     password,
     database,
     autoLoadEntities: true,
-    synchronize: configService.get<boolean>('DB_SYNCHRONIZE'),
-    logging: true,
+    synchronize: isDevelopment,
+    logging: isDevelopment,
   };
 }
 
