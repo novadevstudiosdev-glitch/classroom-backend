@@ -97,8 +97,12 @@ async function bootstrap() {
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
 
-  logger.log(`Backend corriendo en http://localhost:${port}`);
-  logger.log(`Swagger disponible en http://localhost:${port}/${apiPrefix}/docs`);
+  const host = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : `http://localhost:${port}`;
+
+  logger.log(`Backend corriendo en ${host}`);
+  logger.log(`Swagger disponible en ${host}/${apiPrefix}/docs`);
 }
 
 bootstrap();

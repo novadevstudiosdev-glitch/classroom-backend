@@ -26,7 +26,24 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    this.client = url ? new Redis(url) : new Redis({ host, port });
+    const password = this.configService.get<string>('REDIS_PASSWORD');
+
+    if (url) {
+      // Upstash u otro proveedor via URL completa
+      this.client = new Redis(url);
+    } else {
+      // Railway Redis — sin TLS, con opciones de estabilidad
+      this.client = new Redis({
+        host,
+        port,
+        ...(password ? { password } : {}),
+        tls: undefined,
+        retryStrategy: (times) => Math.min(times * 50, 2000),
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+        enableOfflineQueue: false,
+      });
+    }
 
     this.client.on('connect', () => {
       const now = Date.now();
