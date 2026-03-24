@@ -159,7 +159,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Sesión cerrada. El refresh token queda inválido.' })
   @ApiResponse({ status: 401, description: 'Token inválido o expirado.' })
   async logout(@CurrentUser() user: any) {
-    return this.authService.logout(user.sub);
+    return this.authService.logout(user.sub, user.jti, user.exp);
   }
 
   // ─────────────────────────────────────────────────

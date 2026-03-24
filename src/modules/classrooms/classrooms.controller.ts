@@ -139,6 +139,17 @@ export class ClassroomsController {
     return this.classroomsService.removeStudent(id, studentId, user.sub);
   }
 
+  @Get(':id/stats')
+  @Roles('teacher')
+  @ApiOperation({ summary: 'Estadísticas de la clase — alumnos, lecciones y top estudiantes' })
+  @ApiParam({ name: 'id', description: 'UUID de la clase' })
+  @ApiResponse({ status: 200, description: 'Total de alumnos, progreso por lección y ranking de los 5 mejores alumnos.' })
+  @ApiResponse({ status: 403, description: 'No tenés permiso sobre esta clase.' })
+  @ApiResponse({ status: 404, description: 'Clase no encontrada.' })
+  getStats(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
+    return this.classroomsService.getStats(id, user.sub);
+  }
+
   @Get(':id/progress')
   @Roles('teacher')
   @ApiOperation({

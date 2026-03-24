@@ -6,6 +6,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { JwtPayload } from '../interfaces/jwt-payload.interface';
+import { RedisService } from '../../redis/redis.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
@@ -13,6 +14,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     private configService: ConfigService,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    private redisService: RedisService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -21,7 +23,18 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  async validate(payload: JwtPayload) {
+  async validate(payload: JwtPayload & { exp: number }) {
+    // Chequear blacklist — si el token fue invalidado por logout
+    let isBlacklisted: string | null = null;
+    try {
+      isBlacklisted = await this.redisService.get(`blacklist:${payload.jti}`);
+    } catch {
+      // Redis es opcional: si falla, seguimos (fail-open) y el logout real queda degradado.
+    }
+    if (isBlacklisted) {
+      throw new UnauthorizedException('Token inválido.');
+    }
+
     const user = await this.userRepository.findOne({
       where: { id: payload.sub },
     });
@@ -39,6 +52,8 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       email: payload.email,
       role: payload.role,
       profile_id: payload.profile_id,
+      jti: payload.jti,
+      exp: payload.exp,
     };
   }
 }

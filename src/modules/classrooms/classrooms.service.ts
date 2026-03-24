@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 
 import { Classroom } from './entities/classroom.entity';
@@ -25,6 +25,8 @@ export class ClassroomsService {
 
     @InjectRepository(TeacherProfile)
     private teacherRepo: Repository<TeacherProfile>,
+
+    private dataSource: DataSource,
   ) {}
 
   // ─────────────────────────────────────────────────
@@ -326,6 +328,71 @@ export class ClassroomsService {
         joined_at: cs.joined_at,
         last_activity: cs.last_activity,
       }));
+  }
+
+  // ─────────────────────────────────────────────────
+  // STATS DE LA CLASE
+  // ─────────────────────────────────────────────────
+
+  async getStats(classroomId: string, teacherUserId: string) {
+    const classroom = await this.classroomRepo.findOne({ where: { id: classroomId } });
+    if (!classroom) throw new NotFoundException('Clase no encontrada.');
+    await this.assertOwnership(classroom, teacherUserId);
+
+    // Total de alumnos en la clase
+    const [{ total_students }] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total_students
+       FROM classroom_students
+       WHERE classroom_id::text = $1`,
+      [classroomId],
+    );
+
+    // Lecciones asignadas con estadísticas de progreso
+    const completions = await this.dataSource.query(
+      `SELECT
+         l.id::text          AS lesson_id,
+         l.title             AS lesson_title,
+         COUNT(lp.id)::int   AS completed_count,
+         ROUND(AVG(lp.score_pct)::numeric, 1)::float AS avg_score,
+         ROUND(AVG(lp.stars)::numeric, 1)::float      AS avg_stars
+       FROM lesson_assignments la
+       JOIN lessons l ON l.id::text = la.lesson_id::text
+       LEFT JOIN lesson_progress lp
+         ON lp.lesson_id::text = l.id::text
+         AND lp.status = 'completed'
+         AND lp.student_id::text IN (
+           SELECT student_id::text FROM classroom_students WHERE classroom_id::text = $1
+         )
+       WHERE la.classroom_id::text = $1
+       GROUP BY l.id, l.title
+       ORDER BY l.title`,
+      [classroomId],
+    );
+
+    // Top 5 alumnos por XP en la clase
+    const top_students = await this.dataSource.query(
+      `SELECT
+         sp.id::text   AS student_id,
+         sp.alias,
+         sp.avatar_id,
+         sp.xp_total,
+         sp.level
+       FROM classroom_students cs
+       JOIN student_profiles sp ON sp.id::text = cs.student_id::text
+       WHERE cs.classroom_id::text = $1
+       ORDER BY sp.xp_total DESC
+       LIMIT 5`,
+      [classroomId],
+    );
+
+    return {
+      classroom_id: classroomId,
+      classroom_name: classroom.name,
+      total_students,
+      lessons_assigned: completions.length,
+      completions,
+      top_students,
+    };
   }
 
   // ─────────────────────────────────────────────────

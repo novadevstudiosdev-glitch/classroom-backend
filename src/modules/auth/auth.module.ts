@@ -7,6 +7,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { EmailModule } from '../email/email.module';
+import { RedisModule } from '../redis/redis.module';
 
 // Strategies
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -37,6 +38,7 @@ import { ParentStudent } from '../parents/entities/parent-student.entity';
 
     TypeOrmModule.forFeature([User, TeacherProfile, StudentProfile, ParentProfile, Classroom, ClassroomStudent, ParentStudent]),
     EmailModule,
+    RedisModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, JwtRefreshStrategy, GoogleStrategy],

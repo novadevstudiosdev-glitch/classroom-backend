@@ -23,7 +23,7 @@ describe('Auth (e2e)', () => {
 
   it('POST /auth/register/teacher → 201', async () => {
     const res = await request(app.getHttpServer())
-      .post('/auth/register/teacher')
+      .post('/api/auth/register/teacher')
       .send({
         email: TEACHER_EMAIL,
         password: TEACHER_PASSWORD,
@@ -40,7 +40,7 @@ describe('Auth (e2e)', () => {
 
   it('POST /auth/register/teacher → 409 si email ya existe', async () => {
     await request(app.getHttpServer())
-      .post('/auth/register/teacher')
+      .post('/api/auth/register/teacher')
       .send({
         email: TEACHER_EMAIL,
         password: TEACHER_PASSWORD,
@@ -56,7 +56,7 @@ describe('Auth (e2e)', () => {
 
   it('POST /auth/login → 401 si no está verificado', async () => {
     await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/api/auth/login')
       .send({ email: TEACHER_EMAIL, password: TEACHER_PASSWORD })
       .expect(401);
   });
@@ -66,7 +66,7 @@ describe('Auth (e2e)', () => {
     expect(token).toBeDefined();
 
     const res = await request(app.getHttpServer())
-      .post('/auth/verify-email')
+      .post('/api/auth/verify-email')
       .send({ token })
       .expect(200);
 
@@ -75,7 +75,7 @@ describe('Auth (e2e)', () => {
 
   it('POST /auth/verify-email → 400 con token inválido', async () => {
     await request(app.getHttpServer())
-      .post('/auth/verify-email')
+      .post('/api/auth/verify-email')
       .send({ token: 'token-inexistente-invalido' })
       .expect(400);
   });
@@ -84,7 +84,7 @@ describe('Auth (e2e)', () => {
 
   it('POST /auth/login → 200 con tokens', async () => {
     const res = await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/api/auth/login')
       .send({ email: TEACHER_EMAIL, password: TEACHER_PASSWORD })
       .expect(200);
 
@@ -98,7 +98,7 @@ describe('Auth (e2e)', () => {
 
   it('POST /auth/login → 401 con contraseña incorrecta', async () => {
     await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/api/auth/login')
       .send({ email: TEACHER_EMAIL, password: 'wrongpassword' })
       .expect(401);
   });
@@ -107,7 +107,7 @@ describe('Auth (e2e)', () => {
 
   it('GET /auth/me → 200 con usuario autenticado', async () => {
     const res = await request(app.getHttpServer())
-      .get('/auth/me')
+      .get('/api/auth/me')
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
 
@@ -116,14 +116,14 @@ describe('Auth (e2e)', () => {
   });
 
   it('GET /auth/me → 401 sin token', async () => {
-    await request(app.getHttpServer()).get('/auth/me').expect(401);
+    await request(app.getHttpServer()).get('/api/auth/me').expect(401);
   });
 
   // ─── REFRESH ──────────────────────────────────────────
 
   it('POST /auth/refresh → 200 con nuevo access_token', async () => {
     const res = await request(app.getHttpServer())
-      .post('/auth/refresh')
+      .post('/api/auth/refresh')
       .set('Authorization', `Bearer ${refreshToken}`)
       .send({ refresh_token: refreshToken })
       .expect(200);
@@ -136,7 +136,7 @@ describe('Auth (e2e)', () => {
 
   it('POST /auth/logout → 200', async () => {
     const res = await request(app.getHttpServer())
-      .post('/auth/logout')
+      .post('/api/auth/logout')
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
 
@@ -147,7 +147,7 @@ describe('Auth (e2e)', () => {
 
   it('POST /auth/register/teacher → 400 sin campos requeridos', async () => {
     await request(app.getHttpServer())
-      .post('/auth/register/teacher')
+      .post('/api/auth/register/teacher')
       .send({ email: 'solo-email@test.com' })
       .expect(400);
   });

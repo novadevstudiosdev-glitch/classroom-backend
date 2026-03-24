@@ -4,7 +4,8 @@ import { DataSource, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
+import { RedisService } from '../redis/redis.service';
 import { EmailService } from '../email/email.service';
 
 // Entities
@@ -55,6 +56,7 @@ export class AuthService {
     private configService: ConfigService,
     private emailService: EmailService,
     private dataSource: DataSource,
+    private redisService: RedisService,
   ) {}
 
   // ─────────────────────────────────────────────────
@@ -320,12 +322,17 @@ export class AuthService {
     const user = await this.userRepo.findOne({ where: { id: userId } });
 
     if (!user || user.deleted_at) {
-      throw new UnauthorizedException('Usuario no encontrado.');
+      throw new UnauthorizedException('Refresh token inválido.');
     }
 
-    // En una implementación completa con Redis, acá validarías
-    // que el refresh token coincida con el guardado en cache.
-    // Por ahora solo verificamos que el JWT sea válido (lo hace la strategy).
+    if (!user.refresh_token_hash) {
+      throw new UnauthorizedException('Refresh token inválido.');
+    }
+
+    const tokenMatches = await bcrypt.compare(refreshToken, user.refresh_token_hash);
+    if (!tokenMatches) {
+      throw new UnauthorizedException('Refresh token inválido.');
+    }
 
     const profile_id = await this.getProfileId(user);
     const tokens = await this.generateTokens(user, profile_id);
@@ -384,9 +391,21 @@ export class AuthService {
     return { message: '¡Email verificado! Ya podés iniciar sesión.' };
   }
 
-  async logout(userId: string) {
-    // TODO: con Redis, invalidar el refresh token del usuario
-    this.logger.log(`Logout: ${userId}`);
+  async logout(userId: string, jti: string, exp: number) {
+    // Invalidar access token en Redis
+    const ttl = exp - Math.floor(Date.now() / 1000);
+    try {
+      await this.redisService.set(`blacklist:${jti}`, '1', ttl);
+    } catch (err) {
+      this.logger.warn(
+        `Logout: no se pudo escribir en Redis (blacklist). Motivo: ${err?.message}`,
+      );
+    }
+
+    // Invalidar refresh token borrando el hash guardado
+    await this.userRepo.update(userId, { refresh_token_hash: null });
+
+    this.logger.log(`Logout: token ${jti} añadido a blacklist (TTL: ${ttl}s)`);
     return { message: 'Sesión cerrada correctamente.' };
   }
 
@@ -410,6 +429,10 @@ export class AuthService {
 
   private async getProfileId(user: User): Promise<string> {
     switch (user.role) {
+      case 'admin':
+        // Los admins no tienen un profile dedicado (teacher/student/parent).
+        // Usamos el user.id como `profile_id` para mantener el JWT consistente.
+        return user.id;
       case 'teacher': {
         const profile = await this.teacherRepo.findOne({ where: { user_id: user.id } });
         if (!profile) throw new InternalServerErrorException('Perfil de docente no encontrado para este usuario.');
@@ -436,6 +459,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       profile_id,
+      jti: randomUUID(),
     };
 
     const [access_token, refresh_token] = await Promise.all([
@@ -443,11 +467,15 @@ export class AuthService {
         secret: this.configService.get<string>('JWT_SECRET'),
         expiresIn: this.configService.get<string>('JWT_EXPIRES_IN'),
       }),
-      this.jwtService.signAsync(payload, {
+      this.jwtService.signAsync({ ...payload, jti: randomUUID() }, {
         secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
         expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN'),
       }),
     ]);
+
+    // Guardar hash del refresh token — permite invalidarlo en logout
+    const refresh_token_hash = await bcrypt.hash(refresh_token, 10);
+    await this.userRepo.update(user.id, { refresh_token_hash });
 
     return { access_token, refresh_token };
   }

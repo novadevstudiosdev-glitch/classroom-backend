@@ -1,6 +1,5 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { DataSource } from 'typeorm';
 import { createTestApp, cleanupUsers, getVerificationToken } from './helpers/create-app';
 
 const TS = Date.now();
@@ -17,14 +16,14 @@ describe('Lessons (e2e)', () => {
 
     // Registrar y verificar docente
     await request(app.getHttpServer())
-      .post('/auth/register/teacher')
+      .post('/api/auth/register/teacher')
       .send({ email: TEACHER_EMAIL, password: TEACHER_PASSWORD, first_name: 'Test', last_name: 'Lecciones', country: 'AR', recaptcha_token: 'test-token' });
 
     const verToken = await getVerificationToken(app, TEACHER_EMAIL);
-    await request(app.getHttpServer()).post('/auth/verify-email').send({ token: verToken });
+    await request(app.getHttpServer()).post('/api/auth/verify-email').send({ token: verToken });
 
     const loginRes = await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/api/auth/login')
       .send({ email: TEACHER_EMAIL, password: TEACHER_PASSWORD });
     token = loginRes.body.data.access_token;
   });
@@ -38,7 +37,7 @@ describe('Lessons (e2e)', () => {
 
   it('POST /lessons → 201 crea lección en draft', async () => {
     const res = await request(app.getHttpServer())
-      .post('/lessons')
+      .post('/api/lessons')
       .set('Authorization', `Bearer ${token}`)
       .send({ title: 'Lección de prueba e2e' })
       .expect(201);
@@ -51,14 +50,14 @@ describe('Lessons (e2e)', () => {
 
   it('POST /lessons → 401 sin token', async () => {
     await request(app.getHttpServer())
-      .post('/lessons')
+      .post('/api/lessons')
       .send({ title: 'Sin auth' })
       .expect(401);
   });
 
   it('POST /lessons → 400 sin título', async () => {
     await request(app.getHttpServer())
-      .post('/lessons')
+      .post('/api/lessons')
       .set('Authorization', `Bearer ${token}`)
       .send({})
       .expect(400);
@@ -68,7 +67,7 @@ describe('Lessons (e2e)', () => {
 
   it('GET /lessons → 200 lista con paginado', async () => {
     const res = await request(app.getHttpServer())
-      .get('/lessons')
+      .get('/api/lessons')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
@@ -80,7 +79,7 @@ describe('Lessons (e2e)', () => {
 
   it('GET /lessons?status=draft → 200 filtra por status', async () => {
     const res = await request(app.getHttpServer())
-      .get('/lessons?status=draft')
+      .get('/api/lessons?status=draft')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
@@ -92,7 +91,7 @@ describe('Lessons (e2e)', () => {
 
   it('GET /lessons/:id → 200', async () => {
     const res = await request(app.getHttpServer())
-      .get(`/lessons/${lessonId}`)
+      .get(`/api/lessons/${lessonId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
@@ -102,7 +101,7 @@ describe('Lessons (e2e)', () => {
 
   it('GET /lessons/:id → 404 con id inexistente', async () => {
     await request(app.getHttpServer())
-      .get('/lessons/00000000-0000-0000-0000-000000000000')
+      .get('/api/lessons/00000000-0000-0000-0000-000000000000')
       .set('Authorization', `Bearer ${token}`)
       .expect(404);
   });
@@ -111,7 +110,7 @@ describe('Lessons (e2e)', () => {
 
   it('PATCH /lessons/:id → 200 actualiza título', async () => {
     const res = await request(app.getHttpServer())
-      .patch(`/lessons/${lessonId}`)
+      .patch(`/api/lessons/${lessonId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ title: 'Lección actualizada' })
       .expect(200);
@@ -121,7 +120,7 @@ describe('Lessons (e2e)', () => {
 
   it('PATCH /lessons/:id → 200 publica la lección', async () => {
     const res = await request(app.getHttpServer())
-      .patch(`/lessons/${lessonId}`)
+      .patch(`/api/lessons/${lessonId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ status: 'published' })
       .expect(200);
@@ -133,7 +132,7 @@ describe('Lessons (e2e)', () => {
 
   it('DELETE /lessons/:id → 200 soft delete', async () => {
     const res = await request(app.getHttpServer())
-      .delete(`/lessons/${lessonId}`)
+      .delete(`/api/lessons/${lessonId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
@@ -142,14 +141,14 @@ describe('Lessons (e2e)', () => {
 
   it('GET /lessons/:id → 404 después de eliminada', async () => {
     await request(app.getHttpServer())
-      .get(`/lessons/${lessonId}`)
+      .get(`/api/lessons/${lessonId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(404);
   });
 
   it('DELETE /lessons/:id → 404 con id inexistente', async () => {
     await request(app.getHttpServer())
-      .delete('/lessons/00000000-0000-0000-0000-000000000000')
+      .delete('/api/lessons/00000000-0000-0000-0000-000000000000')
       .set('Authorization', `Bearer ${token}`)
       .expect(404);
   });

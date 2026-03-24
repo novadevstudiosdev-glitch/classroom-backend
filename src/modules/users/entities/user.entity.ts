@@ -32,6 +32,9 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true })
   verification_token_expires_at: Date;
 
+  @Column({ type: 'varchar', nullable: true, length: 255 })
+  refresh_token_hash: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 

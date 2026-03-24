@@ -17,20 +17,20 @@ describe('Exercises (e2e)', () => {
 
     // Setup: registrar, verificar y loguear docente
     await request(app.getHttpServer())
-      .post('/auth/register/teacher')
+      .post('/api/auth/register/teacher')
       .send({ email: TEACHER_EMAIL, password: TEACHER_PASSWORD, first_name: 'Test', last_name: 'Ejercicios', country: 'AR', recaptcha_token: 'test-token' });
 
     const verToken = await getVerificationToken(app, TEACHER_EMAIL);
-    await request(app.getHttpServer()).post('/auth/verify-email').send({ token: verToken });
+    await request(app.getHttpServer()).post('/api/auth/verify-email').send({ token: verToken });
 
     const loginRes = await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/api/auth/login')
       .send({ email: TEACHER_EMAIL, password: TEACHER_PASSWORD });
     token = loginRes.body.data.access_token;
 
     // Crear lección base para los ejercicios
     const lessonRes = await request(app.getHttpServer())
-      .post('/lessons')
+      .post('/api/lessons')
       .set('Authorization', `Bearer ${token}`)
       .send({ title: 'Lección para ejercicios e2e' });
     lessonId = lessonRes.body.data.id;
@@ -45,7 +45,7 @@ describe('Exercises (e2e)', () => {
 
   it('POST /exercises → 201 tipo multiple_choice', async () => {
     const res = await request(app.getHttpServer())
-      .post('/exercises')
+      .post('/api/exercises')
       .set('Authorization', `Bearer ${token}`)
       .send({
         lesson_id: lessonId,
@@ -68,7 +68,7 @@ describe('Exercises (e2e)', () => {
 
   it('POST /exercises → 201 tipo fill_blank', async () => {
     const res = await request(app.getHttpServer())
-      .post('/exercises')
+      .post('/api/exercises')
       .set('Authorization', `Bearer ${token}`)
       .send({
         lesson_id: lessonId,
@@ -89,7 +89,7 @@ describe('Exercises (e2e)', () => {
 
   it('POST /exercises → 201 tipo true_false', async () => {
     const res = await request(app.getHttpServer())
-      .post('/exercises')
+      .post('/api/exercises')
       .set('Authorization', `Bearer ${token}`)
       .send({
         lesson_id: lessonId,
@@ -110,7 +110,7 @@ describe('Exercises (e2e)', () => {
 
   it('POST /exercises → 201 tipo match_columns', async () => {
     const res = await request(app.getHttpServer())
-      .post('/exercises')
+      .post('/api/exercises')
       .set('Authorization', `Bearer ${token}`)
       .send({
         lesson_id: lessonId,
@@ -133,7 +133,7 @@ describe('Exercises (e2e)', () => {
 
   it('POST /exercises → 201 tipo order_items', async () => {
     const res = await request(app.getHttpServer())
-      .post('/exercises')
+      .post('/api/exercises')
       .set('Authorization', `Bearer ${token}`)
       .send({
         lesson_id: lessonId,
@@ -154,7 +154,7 @@ describe('Exercises (e2e)', () => {
 
   it('POST /exercises → 400 config_json inválido para el tipo', async () => {
     await request(app.getHttpServer())
-      .post('/exercises')
+      .post('/api/exercises')
       .set('Authorization', `Bearer ${token}`)
       .send({
         lesson_id: lessonId,
@@ -170,7 +170,7 @@ describe('Exercises (e2e)', () => {
 
   it('POST /exercises → 400 tipo inválido', async () => {
     await request(app.getHttpServer())
-      .post('/exercises')
+      .post('/api/exercises')
       .set('Authorization', `Bearer ${token}`)
       .send({
         lesson_id: lessonId,
@@ -183,7 +183,7 @@ describe('Exercises (e2e)', () => {
 
   it('POST /exercises → 400 match_columns con menos de 2 pares', async () => {
     await request(app.getHttpServer())
-      .post('/exercises')
+      .post('/api/exercises')
       .set('Authorization', `Bearer ${token}`)
       .send({
         lesson_id: lessonId,
@@ -198,7 +198,7 @@ describe('Exercises (e2e)', () => {
 
   it('POST /exercises → 404 lesson_id inexistente', async () => {
     await request(app.getHttpServer())
-      .post('/exercises')
+      .post('/api/exercises')
       .set('Authorization', `Bearer ${token}`)
       .send({
         lesson_id: '00000000-0000-0000-0000-000000000000',
@@ -213,7 +213,7 @@ describe('Exercises (e2e)', () => {
 
   it('GET /exercises/:id → 200', async () => {
     const res = await request(app.getHttpServer())
-      .get(`/exercises/${exerciseId}`)
+      .get(`/api/exercises/${exerciseId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
@@ -223,7 +223,7 @@ describe('Exercises (e2e)', () => {
 
   it('GET /exercises/:id → 404 con id inexistente', async () => {
     await request(app.getHttpServer())
-      .get('/exercises/00000000-0000-0000-0000-000000000000')
+      .get('/api/exercises/00000000-0000-0000-0000-000000000000')
       .set('Authorization', `Bearer ${token}`)
       .expect(404);
   });
@@ -232,7 +232,7 @@ describe('Exercises (e2e)', () => {
 
   it('PATCH /exercises/:id → 200 actualiza título', async () => {
     const res = await request(app.getHttpServer())
-      .patch(`/exercises/${exerciseId}`)
+      .patch(`/api/exercises/${exerciseId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ title: 'Ejercicio actualizado' })
       .expect(200);
@@ -242,7 +242,7 @@ describe('Exercises (e2e)', () => {
 
   it('PATCH /exercises/:id → 200 actualiza config_json', async () => {
     const res = await request(app.getHttpServer())
-      .patch(`/exercises/${exerciseId}`)
+      .patch(`/api/exercises/${exerciseId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         config_json: {
@@ -258,7 +258,7 @@ describe('Exercises (e2e)', () => {
 
   it('PATCH /exercises/:id → 400 config_json inválido en update', async () => {
     await request(app.getHttpServer())
-      .patch(`/exercises/${exerciseId}`)
+      .patch(`/api/exercises/${exerciseId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         config_json: { invalido: true },
@@ -270,7 +270,7 @@ describe('Exercises (e2e)', () => {
 
   it('DELETE /exercises/:id → 200', async () => {
     const res = await request(app.getHttpServer())
-      .delete(`/exercises/${exerciseId}`)
+      .delete(`/api/exercises/${exerciseId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
@@ -279,7 +279,7 @@ describe('Exercises (e2e)', () => {
 
   it('GET /exercises/:id → 404 después de eliminado', async () => {
     await request(app.getHttpServer())
-      .get(`/exercises/${exerciseId}`)
+      .get(`/api/exercises/${exerciseId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(404);
   });
