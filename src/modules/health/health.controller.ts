@@ -13,6 +13,14 @@ export class HealthController {
     private redis: RedisHealthIndicator,
   ) {}
 
+  @Get('live')
+  @Public()
+  @ApiOperation({ summary: 'Verificar que el backend estÃ¡ levantado (sin chequear dependencias)' })
+  @ApiResponse({ status: 200, description: 'Backend operativo.' })
+  live() {
+    return { status: 'ok', timestamp: new Date().toISOString() };
+  }
+
   @Get()
   @Public()
   @HealthCheck()

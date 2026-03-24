@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsInt, IsString, IsUUID, Min, ArrayMinSize, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsInt, IsString, Min, ArrayMinSize, ValidateNested } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
