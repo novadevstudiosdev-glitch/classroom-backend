@@ -6,4 +6,9 @@ export class StartSessionDto {
   @IsOptional()
   @IsUUID()
   classroom_id?: string;
+
+  @ApiPropertyOptional({ description: 'ID de la lección en cuyo contexto se juega (opcional)' })
+  @IsOptional()
+  @IsUUID()
+  lesson_id?: string;
 }

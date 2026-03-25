@@ -27,6 +27,19 @@ export class StudentProfile {
   @Column({ nullable: true, length: 50 })
   avatar_id: string;
 
+  @Column({ type: 'text', nullable: true })
+  bio: string;
+
+  @Column({ nullable: true, length: 80 })
+  status_message: string;
+
+  @Column({ type: 'date', nullable: true })
+  birth_date: string | null;
+
+  // Código de 6 chars para que el padre vincule al alumno
+  @Column({ nullable: true, length: 8, unique: true })
+  link_code: string;
+
   @Column({ type: 'int', default: 0 })
   xp_total: number;
 

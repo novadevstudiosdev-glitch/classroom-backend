@@ -135,6 +135,40 @@ export class LessonsService {
     return { message: 'Lección eliminada correctamente.' };
   }
 
+  async closeAssignment(assignmentId: string, userId: string) {
+    const teacher_id = await this.getTeacherId(userId);
+    const assignment = await this.assignmentRepo.findOne({
+      where: { id: assignmentId },
+      relations: ['lesson'],
+    });
+
+    if (!assignment) throw new NotFoundException('Asignación no encontrada.');
+    if (assignment.lesson.teacher_id !== teacher_id) throw new ForbiddenException('No tenés permiso.');
+    if (assignment.is_closed) throw new ForbiddenException('La asignación ya está cerrada.');
+
+    assignment.is_closed = true;
+    await this.assignmentRepo.save(assignment);
+
+    return { message: 'Lección cerrada. Los alumnos ya no pueden completarla.' };
+  }
+
+  async reopenAssignment(assignmentId: string, userId: string) {
+    const teacher_id = await this.getTeacherId(userId);
+    const assignment = await this.assignmentRepo.findOne({
+      where: { id: assignmentId },
+      relations: ['lesson'],
+    });
+
+    if (!assignment) throw new NotFoundException('Asignación no encontrada.');
+    if (assignment.lesson.teacher_id !== teacher_id) throw new ForbiddenException('No tenés permiso.');
+    if (!assignment.is_closed) throw new ForbiddenException('La asignación no está cerrada.');
+
+    assignment.is_closed = false;
+    await this.assignmentRepo.save(assignment);
+
+    return { message: 'Lección reabierta. Los alumnos pueden volver a completarla.' };
+  }
+
   async assign(userId: string, lessonId: string, dto: AssignLessonDto) {
     const teacher_id = await this.getTeacherId(userId);
 

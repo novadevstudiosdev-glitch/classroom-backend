@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Session } from './entities/session.entity';
 import { Minigame } from '../minigames/entities/minigame.entity';
+import { MinigameInstance } from '../minigame-instances/entities/minigame-instance.entity';
 import { StudentProfile } from '../students/entities/student-profile.entity';
 import { StartSessionDto } from './dto/start-session.dto';
 import { MinigameEventDto } from './dto/minigame-event.dto';
@@ -20,6 +21,8 @@ export class SessionsService {
     private sessionRepo: Repository<Session>,
     @InjectRepository(Minigame)
     private minigameRepo: Repository<Minigame>,
+    @InjectRepository(MinigameInstance)
+    private instanceRepo: Repository<MinigameInstance>,
     private dataSource: DataSource,
   ) {}
 
@@ -27,6 +30,7 @@ export class SessionsService {
     const session = this.sessionRepo.create({
       student_id: studentProfileId,
       classroom_id: dto.classroom_id ?? null,
+      lesson_id: dto.lesson_id ?? null,
       events: [],
     });
     return this.sessionRepo.save(session);
@@ -66,6 +70,13 @@ export class SessionsService {
       ? Math.round((dto.score / dto.max_score) * 30)
       : 0;
 
+    // Feature 13: guardar snapshot del content_json al momento de jugar
+    let content_snapshot: Record<string, any>[] | undefined;
+    if (dto.instance_id) {
+      const instance = await this.instanceRepo.findOne({ where: { id: dto.instance_id } });
+      if (instance) content_snapshot = instance.content_json;
+    }
+
     const event: SessionEvent = {
       type: 'minigame',
       minigame_id: dto.minigame_id,
@@ -75,6 +86,7 @@ export class SessionsService {
       completed: dto.completed,
       xp_earned: xpEarned,
       occurred_at: new Date().toISOString(),
+      content_snapshot,
     };
 
     session.events = [...session.events, event];

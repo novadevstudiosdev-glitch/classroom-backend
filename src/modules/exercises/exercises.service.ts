@@ -44,6 +44,23 @@ export class ExercisesService {
     }
   }
 
+  async findByLesson(userId: string, role: string, lessonId: string): Promise<Exercise[]> {
+    if (role === 'teacher') {
+      const teacher_id = await this.getTeacherId(userId);
+      const lesson = await this.lessonRepo.findOne({ where: { id: lessonId, teacher_id } });
+      if (!lesson) throw new NotFoundException('Lección no encontrada.');
+    } else {
+      // Alumno: la lección debe estar publicada
+      const lesson = await this.lessonRepo.findOne({ where: { id: lessonId, status: 'published' } });
+      if (!lesson) throw new NotFoundException('Lección no encontrada.');
+    }
+
+    return this.exerciseRepo.find({
+      where: { lesson_id: lessonId },
+      order: { order: 'ASC' },
+    });
+  }
+
   async create(userId: string, dto: CreateExerciseDto): Promise<Exercise> {
     const teacher_id = await this.getTeacherId(userId);
 
