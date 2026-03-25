@@ -4,6 +4,8 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
 import type { NextFunction, Request, Response } from 'express';
 import { timingSafeEqual } from 'crypto';
+import helmet from 'helmet';
+import compression from 'compression';
 import { AppModule } from './app.module';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -19,6 +21,9 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
   const logger = app.get(Logger);
+
+  app.use(helmet());
+  app.use(compression());
 
   const apiPrefix = process.env.API_PREFIX ?? 'api';
   app.setGlobalPrefix(apiPrefix);
@@ -97,8 +102,12 @@ async function bootstrap() {
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
 
-  logger.log(`Backend corriendo en http://localhost:${port}`);
-  logger.log(`Swagger disponible en http://localhost:${port}/${apiPrefix}/docs`);
+  const host = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : `http://localhost:${port}`;
+
+  logger.log(`Backend corriendo en ${host}`);
+  logger.log(`Swagger disponible en ${host}/${apiPrefix}/docs`);
 }
 
 bootstrap();

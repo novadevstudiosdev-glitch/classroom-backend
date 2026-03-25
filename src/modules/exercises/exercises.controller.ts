@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, HttpCode, HttpStatus, ParseUUIDPipe } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiParam } from '@nestjs/swagger';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, HttpCode, HttpStatus, ParseUUIDPipe } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { ExercisesService } from './exercises.service';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
@@ -83,6 +83,19 @@ export class ExercisesController {
   @ApiResponse({ status: 404, description: 'Lección no encontrada.' })
   async create(@CurrentUser() user: any, @Body() dto: CreateExerciseDto) {
     return this.exercisesService.create(user.sub, dto);
+  }
+
+  @Get()
+  @Roles('teacher', 'student')
+  @ApiOperation({ summary: 'Listar ejercicios de una lección' })
+  @ApiQuery({ name: 'lesson_id', required: true, description: 'UUID de la lección' })
+  @ApiResponse({ status: 200, description: 'Lista de ejercicios ordenados.' })
+  @ApiResponse({ status: 404, description: 'Lección no encontrada.' })
+  async findByLesson(
+    @CurrentUser() user: any,
+    @Query('lesson_id', ParseUUIDPipe) lessonId: string,
+  ) {
+    return this.exercisesService.findByLesson(user.sub, user.role, lessonId);
   }
 
   @Get(':id')

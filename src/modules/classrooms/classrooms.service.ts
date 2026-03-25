@@ -2,12 +2,17 @@ import { Injectable, NotFoundException, ForbiddenException, ConflictException, B
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
+import { parse } from 'csv-parse/sync';
+import * as bcrypt from 'bcrypt';
 
 import { Classroom } from './entities/classroom.entity';
 import { ClassroomStudent } from './entities/classroom-student.entity';
-import { TeacherProfile } from '../teachers/entities/teacher-profile.entity';
+import { TeachersService } from '../teachers/teachers.service';
 import { CreateClassroomDto } from './dto/create-classroom.dto';
 import { UpdateClassroomDto } from './dto/update-classroom.dto';
+import { StudentsService } from '../students/students.service';
+import { User } from '../users/entities/user.entity';
+import { StudentProfile } from '../students/entities/student-profile.entity';
 
 // Límite de clases activas para plan gratuito
 const FREE_PLAN_CLASSROOM_LIMIT = 1;
@@ -18,14 +23,19 @@ export class ClassroomsService {
 
   constructor(
     @InjectRepository(Classroom)
-    private classroomRepo: Repository<Classroom>, 
+    private classroomRepo: Repository<Classroom>,
 
     @InjectRepository(ClassroomStudent)
     private classroomStudentRepo: Repository<ClassroomStudent>,
 
-    @InjectRepository(TeacherProfile)
-    private teacherRepo: Repository<TeacherProfile>,
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
 
+    @InjectRepository(StudentProfile)
+    private studentProfileRepo: Repository<StudentProfile>,
+
+    private teachersService: TeachersService,
+    private studentsService: StudentsService,
     private dataSource: DataSource,
   ) {}
 
@@ -34,7 +44,7 @@ export class ClassroomsService {
   // ─────────────────────────────────────────────────
 
   async create(teacherUserId: string, dto: CreateClassroomDto): Promise<Classroom> {
-    const teacher = await this.getTeacherOrFail(teacherUserId);
+    const teacher = await this.teachersService.getProfileOrFail(teacherUserId);
 
     // Validar límite del plan gratuito
     if (teacher.plan_type === 'free') {
@@ -70,25 +80,22 @@ export class ClassroomsService {
   // ─────────────────────────────────────────────────
 
   async findAllByTeacher(teacherUserId: string, archived: boolean = false) {
-    const teacher = await this.getTeacherOrFail(teacherUserId);
+    const teacher = await this.teachersService.getProfileOrFail(teacherUserId);
 
-    const classrooms = await this.classroomRepo.find({
-      where: { teacher_id: teacher.id, is_archived: archived },
-      order: { created_at: 'DESC' },
-    });
-
-    // Agregar conteo de alumnos a cada clase
-    const result = await Promise.all(
-      classrooms.map(async (classroom) => {
-        const students_count = await this.classroomStudentRepo.count({
-          where: { classroom_id: classroom.id },
-        });
-
-        return { ...classroom, students_count };
-      }),
+    const rows = await this.dataSource.query(
+      `SELECT
+         c.*,
+         COUNT(cs.student_id)::int AS students_count
+       FROM classrooms c
+       LEFT JOIN classroom_students cs ON cs.classroom_id = c.id
+       WHERE c.teacher_id = $1
+         AND c.is_archived = $2
+       GROUP BY c.id
+       ORDER BY c.created_at DESC`,
+      [teacher.id, archived],
     );
 
-    return result;
+    return rows;
   }
 
   // ─────────────────────────────────────────────────
@@ -143,7 +150,7 @@ export class ClassroomsService {
 
     // Si intenta desarchivar, verificar límite del plan
     if (dto.is_archived === false && classroom.is_archived) {
-      const teacher = await this.getTeacherOrFail(teacherUserId);
+      const teacher = await this.teachersService.getProfileOrFail(teacherUserId);
 
       if (teacher.plan_type === 'free') {
         const activeCount = await this.classroomRepo.count({
@@ -231,9 +238,42 @@ export class ClassroomsService {
       throw new NotFoundException('El alumno no pertenece a esta clase.');
     }
 
-    await this.classroomStudentRepo.remove(classroomStudent);
+    classroomStudent.left_at = new Date();
+    await this.classroomStudentRepo.save(classroomStudent);
+
+    // Soft delete del lesson_progress para lecciones de esta clase
+    await this.softDeleteProgressForClassroom(studentId, classroomId);
 
     return { message: 'Alumno removido de la clase.' };
+  }
+
+  // ─────────────────────────────────────────────────
+  // ALUMNO — SALIR DE UNA CLASE
+  // ─────────────────────────────────────────────────
+
+  async leaveClassroom(classroomId: string, studentUserId: string) {
+    const student = await this.studentsService.getProfile(studentUserId);
+
+    const classroomStudent = await this.classroomStudentRepo.findOne({
+      where: { classroom_id: classroomId, student_id: student.id },
+    });
+
+    if (!classroomStudent) {
+      throw new NotFoundException('No pertenecés a esta clase.');
+    }
+
+    if (classroomStudent.left_at) {
+      throw new ConflictException('Ya saliste de esta clase.');
+    }
+
+    classroomStudent.left_at = new Date();
+    await this.classroomStudentRepo.save(classroomStudent);
+
+    await this.softDeleteProgressForClassroom(student.id, classroomId);
+
+    this.logger.log(`Alumno ${student.id} salió de la clase ${classroomId}`);
+
+    return { message: 'Saliste de la clase correctamente.' };
   }
 
   // ─────────────────────────────────────────────────
@@ -242,31 +282,57 @@ export class ClassroomsService {
   // ─────────────────────────────────────────────────
 
   async getProgress(classroomId: string, teacherUserId: string) {
-    const classroom = await this.classroomRepo.findOne({
-      where: { id: classroomId },
-    });
-
-    if (!classroom) {
-      throw new NotFoundException('Clase no encontrada.');
-    }
-
+    const classroom = await this.classroomRepo.findOne({ where: { id: classroomId } });
+    if (!classroom) throw new NotFoundException('Clase no encontrada.');
     await this.assertOwnership(classroom, teacherUserId);
 
-    const classroomStudents = await this.classroomStudentRepo.find({
-      where: { classroom_id: classroomId },
-      relations: ['student'],
-    });
+    // Alumnos de la clase
+    const students = await this.dataSource.query(
+      `SELECT sp.id::text AS student_id, sp.alias, sp.avatar_id, sp.xp_total, sp.level
+       FROM classroom_students cs
+       JOIN student_profiles sp ON sp.id::text = cs.student_id::text
+       WHERE cs.classroom_id::text = $1
+       ORDER BY sp.alias ASC`,
+      [classroomId],
+    );
+
+    // Lecciones asignadas a la clase
+    const lessons = await this.dataSource.query(
+      `SELECT l.id::text AS lesson_id, l.title, la.due_date, la.assigned_at
+       FROM lesson_assignments la
+       JOIN lessons l ON l.id::text = la.lesson_id::text
+       WHERE la.classroom_id::text = $1
+         AND l.deleted_at IS NULL
+       ORDER BY la.assigned_at ASC`,
+      [classroomId],
+    );
+
+    // Progreso de cada alumno por cada lección
+    const progress = await this.dataSource.query(
+      `SELECT
+         lp.student_id::text,
+         lp.lesson_id::text,
+         lp.status,
+         lp.stars,
+         lp.score_pct,
+         lp.xp_earned,
+         lp.completed_at
+       FROM lesson_progress lp
+       WHERE lp.student_id::text IN (
+         SELECT student_id::text FROM classroom_students WHERE classroom_id::text = $1
+       )
+       AND lp.lesson_id::text IN (
+         SELECT lesson_id::text FROM lesson_assignments WHERE classroom_id::text = $1
+       )`,
+      [classroomId],
+    );
 
     return {
       classroom_id: classroomId,
-      students: classroomStudents.map((cs) => ({
-        student_id: cs.student_id,
-        alias: cs.student?.alias,
-        avatar_id: cs.student?.avatar_id,
-      })),
-      lessons: [], // Se completará con el módulo lessons
-      progress: [], // Se completará con el módulo progress
-      note: 'La matriz de progreso estará disponible cuando se implemente el módulo lessons.',
+      classroom_name: classroom.name,
+      students,
+      lessons,
+      progress,
     };
   }
 
@@ -399,24 +465,95 @@ export class ClassroomsService {
   // HELPERS PRIVADOS
   // ─────────────────────────────────────────────────
 
-  private async getTeacherOrFail(userId: string): Promise<TeacherProfile> {
-    const teacher = await this.teacherRepo.findOne({
-      where: { user_id: userId },
-    });
-
-    if (!teacher) {
-      throw new NotFoundException('Perfil de docente no encontrado.');
-    }
-
-    return teacher;
-  }
-
   private async assertOwnership(classroom: Classroom, teacherUserId: string): Promise<void> {
-    const teacher = await this.getTeacherOrFail(teacherUserId);
+    const teacher = await this.teachersService.getProfileOrFail(teacherUserId);
 
     if (classroom.teacher_id !== teacher.id) {
       throw new ForbiddenException('No tenés permiso para acceder a esta clase.');
     }
+  }
+
+  // ─────────────────────────────────────────────────
+  // CSV IMPORT DE ALUMNOS
+  // ─────────────────────────────────────────────────
+
+  async importStudentsCsv(classroomId: string, teacherUserId: string, csvBuffer: Buffer) {
+    const classroom = await this.classroomRepo.findOne({ where: { id: classroomId } });
+    if (!classroom) throw new NotFoundException('Clase no encontrada.');
+    await this.assertOwnership(classroom, teacherUserId);
+
+    let rows: { email: string; alias: string }[];
+    try {
+      rows = parse(csvBuffer, { columns: true, skip_empty_lines: true, trim: true });
+    } catch {
+      throw new BadRequestException('Formato de CSV inválido. Columnas requeridas: email, alias');
+    }
+
+    if (!rows.length) throw new BadRequestException('El CSV está vacío.');
+
+    const results = { imported: 0, already_existed: 0, added_to_class: 0, failed: [] as { row: number; email: string; reason: string }[] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const { email, alias } = rows[i];
+
+      if (!email || !alias) {
+        results.failed.push({ row: i + 2, email: email || '', reason: 'email o alias vacío' });
+        continue;
+      }
+
+      try {
+        let user = await this.userRepo.findOne({ where: { email: email.toLowerCase() } });
+        let profile: StudentProfile | null = null;
+
+        if (!user) {
+          // Crear cuenta con contraseña temporal
+          const tempPassword = randomBytes(8).toString('hex');
+          const password_hash = await bcrypt.hash(tempPassword, 12);
+
+          await this.dataSource.transaction(async (manager) => {
+            user = manager.create(User, { email: email.toLowerCase(), password_hash, role: 'student', is_verified: true });
+            await manager.save(user);
+            profile = manager.create(StudentProfile, { user_id: user!.id, alias, xp_total: 0, level: 1 });
+            await manager.save(profile);
+          });
+
+          results.imported++;
+        } else {
+          profile = await this.studentProfileRepo.findOne({ where: { user_id: user.id } });
+          results.already_existed++;
+        }
+
+        if (!profile) continue;
+
+        const already = await this.classroomStudentRepo.findOne({
+          where: { classroom_id: classroomId, student_id: profile.id },
+        });
+
+        if (!already) {
+          const cs = this.classroomStudentRepo.create({ classroom_id: classroomId, student_id: profile.id });
+          await this.classroomStudentRepo.save(cs);
+          results.added_to_class++;
+        }
+      } catch (err) {
+        results.failed.push({ row: i + 2, email, reason: (err as Error).message });
+      }
+    }
+
+    this.logger.log(`CSV import en clase ${classroomId}: ${results.imported} nuevos, ${results.added_to_class} agregados`);
+    return results;
+  }
+
+  private async softDeleteProgressForClassroom(studentId: string, classroomId: string): Promise<void> {
+    await this.dataSource.query(
+      `UPDATE lesson_progress
+       SET deleted_at = NOW()
+       WHERE deleted_at IS NULL
+         AND student_id::text = $1
+         AND lesson_id::text IN (
+           SELECT lesson_id::text FROM lesson_assignments WHERE classroom_id::text = $2
+         )`,
+      [studentId, classroomId],
+    );
   }
 
   private async generateUniqueInviteCode(): Promise<string> {

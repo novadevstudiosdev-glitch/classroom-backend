@@ -92,6 +92,24 @@ export class LessonsController {
     return this.lessonsService.remove(user.sub, id);
   }
 
+  @Patch('assignments/:assignmentId/close')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cerrar una asignación — los alumnos no pueden completarla' })
+  @ApiResponse({ status: 200, description: 'Asignación cerrada.' })
+  @ApiResponse({ status: 404, description: 'Asignación no encontrada.' })
+  closeAssignment(@CurrentUser() user: any, @Param('assignmentId', ParseUUIDPipe) assignmentId: string) {
+    return this.lessonsService.closeAssignment(assignmentId, user.sub);
+  }
+
+  @Patch('assignments/:assignmentId/reopen')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reabrir una asignación cerrada' })
+  @ApiResponse({ status: 200, description: 'Asignación reabierta.' })
+  @ApiResponse({ status: 404, description: 'Asignación no encontrada.' })
+  reopenAssignment(@CurrentUser() user: any, @Param('assignmentId', ParseUUIDPipe) assignmentId: string) {
+    return this.lessonsService.reopenAssignment(assignmentId, user.sub);
+  }
+
   @Post(':id/assign')
   @ApiOperation({ summary: 'Asignar una lección a una clase con fecha límite opcional', description: 'La lección debe estar en estado published. Se puede asignar a múltiples clases.' })
   @ApiResponse({ status: 201, description: 'Lección asignada a la clase.' })

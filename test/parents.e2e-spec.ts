@@ -51,7 +51,7 @@ describe('Parents (e2e)', () => {
     // Confirmar el vínculo padre-alumno manualmente (simula que el alumno hizo click en el email)
     const ds = app.get(DataSource);
     await ds.query(
-      `UPDATE parent_students SET is_confirmed = true
+      `UPDATE parent_students SET status = 'confirmed'
        WHERE parent_id::text = (
          SELECT pp.id::text FROM parent_profiles pp
          JOIN users u ON u.id::text = pp.user_id::text
@@ -76,9 +76,9 @@ describe('Parents (e2e)', () => {
 
     expect(res.body.data).toHaveProperty('first_name', 'Padre');
     expect(res.body.data).toHaveProperty('last_name', 'Test');
-    expect(res.body.data).toHaveProperty('students');
-    expect(Array.isArray(res.body.data.students)).toBe(true);
-    expect(res.body.data.students.length).toBeGreaterThan(0);
+    expect(res.body.data).toHaveProperty('children');
+    expect(Array.isArray(res.body.data.children)).toBe(true);
+    expect(res.body.data.children.length).toBeGreaterThan(0);
   });
 
   it('GET /parents/me → 401 sin token', async () => {

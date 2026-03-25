@@ -31,6 +31,9 @@ export class LessonAssignment {
   @Column({ nullable: true, type: 'timestamptz' })
   due_date: Date | null;
 
+  @Column({ default: false })
+  is_closed: boolean;
+
   @CreateDateColumn({ type: 'timestamptz' })
   assigned_at: Date;
 }

@@ -3,8 +3,11 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
   Unique,
 } from 'typeorm';
+
+export type ParentStudentStatus = 'pending' | 'confirmed' | 'rejected';
 
 @Entity('parent_students')
 @Unique(['parent_id', 'student_id'])
@@ -18,15 +21,12 @@ export class ParentStudent {
   @Column()
   student_id: string;
 
-  @Column({ default: false })
-  is_confirmed: boolean;
-
-  @Column({ nullable: true, length: 255 })
-  confirmation_token: string;
-
-  @Column({ type: 'timestamptz', nullable: true })
-  confirmation_token_expires_at: Date;
+  @Column({ type: 'varchar', length: 20, default: 'pending' })
+  status: ParentStudentStatus;
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
+
+  @UpdateDateColumn({ type: 'timestamptz' })
+  updated_at: Date;
 }
