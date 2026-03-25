@@ -64,15 +64,15 @@ export class AdminService {
         students: byRole['student'] ?? 0,
         parents: byRole['parent'] ?? 0,
         admins: byRole['admin'] ?? 0,
-        new_last_7_days: recentRow[0].new_users,
+        new_last_7_days: recentRow[0]?.new_users ?? 0,
       },
       content: {
-        active_classrooms: classrooms[0].total,
-        published_lessons: lessons[0].total,
-        active_minigames: minigames[0].total,
+        active_classrooms: classrooms[0]?.total ?? 0,
+        published_lessons: lessons[0]?.total ?? 0,
+        active_minigames: minigames[0]?.total ?? 0,
       },
       engagement: {
-        total_xp_distributed: xpRow[0].total_xp,
+        total_xp_distributed: xpRow[0]?.total_xp ?? 0,
       },
     };
   }
@@ -222,12 +222,12 @@ export class AdminService {
 
     return {
       sessions: {
-        last_7_days: sessions7[0].total,
-        last_30_days: sessions30[0].total,
+        last_7_days: sessions7[0]?.total ?? 0,
+        last_30_days: sessions30[0]?.total ?? 0,
       },
       lesson_completions: {
-        last_7_days: completions7[0].total,
-        last_30_days: completions30[0].total,
+        last_7_days: completions7[0]?.total ?? 0,
+        last_30_days: completions30[0]?.total ?? 0,
       },
       top_students: topStudents,
       top_teachers: topTeachers,

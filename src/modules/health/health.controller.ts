@@ -29,7 +29,7 @@ export class HealthController {
   @ApiResponse({ status: 503, description: 'Uno o más servicios con problemas.' })
   check() {
     return this.health.check([
-      () => this.db.pingCheck('database'),
+      () => this.db.pingCheck('database', { timeout: 3000 }),
       () => this.redis.isHealthy('redis'),
     ]);
   }

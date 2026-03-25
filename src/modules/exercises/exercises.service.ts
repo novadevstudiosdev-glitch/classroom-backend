@@ -5,7 +5,7 @@ import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { Exercise } from './entities/exercise.entity';
 import { Lesson } from '../lessons/entities/lesson.entity';
-import { TeacherProfile } from '../teachers/entities/teacher-profile.entity';
+import { TeachersService } from '../teachers/teachers.service';
 import { CreateExerciseDto, CONFIG_SCHEMA_MAP } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { ExerciseCorrectorService } from './answer/exercise-corrector.service';
@@ -22,15 +22,12 @@ export class ExercisesService {
     @InjectRepository(Lesson)
     private lessonRepo: Repository<Lesson>,
 
-    @InjectRepository(TeacherProfile)
-    private teacherRepo: Repository<TeacherProfile>,
-
+    private teachersService: TeachersService,
     private correctorService: ExerciseCorrectorService,
   ) {}
 
   private async getTeacherId(userId: string): Promise<string> {
-    const profile = await this.teacherRepo.findOne({ where: { user_id: userId } });
-    if (!profile) throw new ForbiddenException('Solo los docentes pueden gestionar ejercicios.');
+    const profile = await this.teachersService.getProfileOrFail(userId);
     return profile.id;
   }
 

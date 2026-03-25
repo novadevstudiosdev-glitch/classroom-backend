@@ -4,12 +4,13 @@ import { LessonsController } from './lessons.controller';
 import { LessonsService } from './lessons.service';
 import { Lesson } from './entities/lesson.entity';
 import { LessonAssignment } from './entities/lesson-assignment.entity';
-import { TeacherProfile } from '../teachers/entities/teacher-profile.entity';
 import { Classroom } from '../classrooms/entities/classroom.entity';
+import { TeachersModule } from '../teachers/teachers.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Lesson, LessonAssignment, TeacherProfile, Classroom]),
+    TypeOrmModule.forFeature([Lesson, LessonAssignment, Classroom]),
+    TeachersModule,
   ],
   controllers: [LessonsController],
   providers: [LessonsService],

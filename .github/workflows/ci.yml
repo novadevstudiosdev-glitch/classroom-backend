@@ -39,7 +39,7 @@ jobs:
           API_PREFIX: api
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          JWT_EXPIRES_IN: 1h
+          JWT_EXPIRES_IN: 15m
           JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
           JWT_REFRESH_EXPIRES_IN: 7d
           REDIS_URL: ${{ secrets.REDIS_URL }}

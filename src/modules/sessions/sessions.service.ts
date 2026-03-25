@@ -5,12 +5,13 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Session } from './entities/session.entity';
 import { Minigame } from '../minigames/entities/minigame.entity';
-import { StudentsService } from '../students/students.service';
+import { StudentProfile } from '../students/entities/student-profile.entity';
 import { StartSessionDto } from './dto/start-session.dto';
 import { MinigameEventDto } from './dto/minigame-event.dto';
+import { SessionEvent } from './interfaces/session-event.interface';
 
 @Injectable()
 export class SessionsService {
@@ -19,7 +20,7 @@ export class SessionsService {
     private sessionRepo: Repository<Session>,
     @InjectRepository(Minigame)
     private minigameRepo: Repository<Minigame>,
-    private studentsService: StudentsService,
+    private dataSource: DataSource,
   ) {}
 
   async startSession(studentProfileId: string, dto: StartSessionDto): Promise<Session> {
@@ -55,7 +56,7 @@ export class SessionsService {
 
     // Prevenir doble envío del mismo minijuego en la misma sesión
     const alreadyPlayed = session.events.some(
-      (e) => e['type'] === 'minigame' && e['minigame_id'] === dto.minigame_id,
+      (e) => e.type === 'minigame' && e.minigame_id === dto.minigame_id,
     );
     if (alreadyPlayed) {
       throw new ConflictException('Este minijuego ya fue registrado en esta sesión.');
@@ -65,7 +66,7 @@ export class SessionsService {
       ? Math.round((dto.score / dto.max_score) * 30)
       : 0;
 
-    const event = {
+    const event: SessionEvent = {
       type: 'minigame',
       minigame_id: dto.minigame_id,
       minigame_slug: minigame.slug,
@@ -77,11 +78,19 @@ export class SessionsService {
     };
 
     session.events = [...session.events, event];
-    await this.sessionRepo.save(session);
 
-    if (xpEarned > 0) {
-      await this.studentsService.addXp(studentProfileId, xpEarned);
-    }
+    await this.dataSource.transaction(async (manager) => {
+      await manager.save(Session, session);
+
+      if (xpEarned > 0) {
+        await manager.increment(StudentProfile, { id: studentProfileId }, 'xp_total', xpEarned);
+        const profile = await manager.findOne(StudentProfile, { where: { id: studentProfileId } });
+        if (profile) {
+          profile.level = Math.floor(profile.xp_total / 100) + 1;
+          await manager.save(StudentProfile, profile);
+        }
+      }
+    });
 
     return session;
   }

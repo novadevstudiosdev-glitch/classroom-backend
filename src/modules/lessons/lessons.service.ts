@@ -8,8 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Lesson } from './entities/lesson.entity';
 import { LessonAssignment } from './entities/lesson-assignment.entity';
-import { TeacherProfile } from '../teachers/entities/teacher-profile.entity';
 import { Classroom } from '../classrooms/entities/classroom.entity';
+import { TeachersService } from '../teachers/teachers.service';
 import { CreateLessonDto } from './dto/create-lesson.dto';
 import { UpdateLessonDto } from './dto/update-lesson.dto';
 import { AssignLessonDto } from './dto/assign-lesson.dto';
@@ -26,17 +26,14 @@ export class LessonsService {
     @InjectRepository(LessonAssignment)
     private assignmentRepo: Repository<LessonAssignment>,
 
-    @InjectRepository(TeacherProfile)
-    private teacherRepo: Repository<TeacherProfile>,
+    private teachersService: TeachersService,
 
     @InjectRepository(Classroom)
     private classroomRepo: Repository<Classroom>,
   ) {}
 
-  // Obtener el teacher_id a partir del user_id (sub del JWT)
   private async getTeacherId(userId: string): Promise<string> {
-    const profile = await this.teacherRepo.findOne({ where: { user_id: userId } });
-    if (!profile) throw new ForbiddenException('Solo los docentes pueden gestionar lecciones.');
+    const profile = await this.teachersService.getProfileOrFail(userId);
     return profile.id;
   }
 

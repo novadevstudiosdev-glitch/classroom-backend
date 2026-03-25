@@ -5,7 +5,7 @@ import { randomBytes } from 'crypto';
 
 import { Classroom } from './entities/classroom.entity';
 import { ClassroomStudent } from './entities/classroom-student.entity';
-import { TeacherProfile } from '../teachers/entities/teacher-profile.entity';
+import { TeachersService } from '../teachers/teachers.service';
 import { CreateClassroomDto } from './dto/create-classroom.dto';
 import { UpdateClassroomDto } from './dto/update-classroom.dto';
 
@@ -23,9 +23,7 @@ export class ClassroomsService {
     @InjectRepository(ClassroomStudent)
     private classroomStudentRepo: Repository<ClassroomStudent>,
 
-    @InjectRepository(TeacherProfile)
-    private teacherRepo: Repository<TeacherProfile>,
-
+    private teachersService: TeachersService,
     private dataSource: DataSource,
   ) {}
 
@@ -34,7 +32,7 @@ export class ClassroomsService {
   // ─────────────────────────────────────────────────
 
   async create(teacherUserId: string, dto: CreateClassroomDto): Promise<Classroom> {
-    const teacher = await this.getTeacherOrFail(teacherUserId);
+    const teacher = await this.teachersService.getProfileOrFail(teacherUserId);
 
     // Validar límite del plan gratuito
     if (teacher.plan_type === 'free') {
@@ -70,25 +68,22 @@ export class ClassroomsService {
   // ─────────────────────────────────────────────────
 
   async findAllByTeacher(teacherUserId: string, archived: boolean = false) {
-    const teacher = await this.getTeacherOrFail(teacherUserId);
+    const teacher = await this.teachersService.getProfileOrFail(teacherUserId);
 
-    const classrooms = await this.classroomRepo.find({
-      where: { teacher_id: teacher.id, is_archived: archived },
-      order: { created_at: 'DESC' },
-    });
-
-    // Agregar conteo de alumnos a cada clase
-    const result = await Promise.all(
-      classrooms.map(async (classroom) => {
-        const students_count = await this.classroomStudentRepo.count({
-          where: { classroom_id: classroom.id },
-        });
-
-        return { ...classroom, students_count };
-      }),
+    const rows = await this.dataSource.query(
+      `SELECT
+         c.*,
+         COUNT(cs.student_id)::int AS students_count
+       FROM classrooms c
+       LEFT JOIN classroom_students cs ON cs.classroom_id = c.id
+       WHERE c.teacher_id = $1
+         AND c.is_archived = $2
+       GROUP BY c.id
+       ORDER BY c.created_at DESC`,
+      [teacher.id, archived],
     );
 
-    return result;
+    return rows;
   }
 
   // ─────────────────────────────────────────────────
@@ -143,7 +138,7 @@ export class ClassroomsService {
 
     // Si intenta desarchivar, verificar límite del plan
     if (dto.is_archived === false && classroom.is_archived) {
-      const teacher = await this.getTeacherOrFail(teacherUserId);
+      const teacher = await this.teachersService.getProfileOrFail(teacherUserId);
 
       if (teacher.plan_type === 'free') {
         const activeCount = await this.classroomRepo.count({
@@ -242,31 +237,57 @@ export class ClassroomsService {
   // ─────────────────────────────────────────────────
 
   async getProgress(classroomId: string, teacherUserId: string) {
-    const classroom = await this.classroomRepo.findOne({
-      where: { id: classroomId },
-    });
-
-    if (!classroom) {
-      throw new NotFoundException('Clase no encontrada.');
-    }
-
+    const classroom = await this.classroomRepo.findOne({ where: { id: classroomId } });
+    if (!classroom) throw new NotFoundException('Clase no encontrada.');
     await this.assertOwnership(classroom, teacherUserId);
 
-    const classroomStudents = await this.classroomStudentRepo.find({
-      where: { classroom_id: classroomId },
-      relations: ['student'],
-    });
+    // Alumnos de la clase
+    const students = await this.dataSource.query(
+      `SELECT sp.id::text AS student_id, sp.alias, sp.avatar_id, sp.xp_total, sp.level
+       FROM classroom_students cs
+       JOIN student_profiles sp ON sp.id::text = cs.student_id::text
+       WHERE cs.classroom_id::text = $1
+       ORDER BY sp.alias ASC`,
+      [classroomId],
+    );
+
+    // Lecciones asignadas a la clase
+    const lessons = await this.dataSource.query(
+      `SELECT l.id::text AS lesson_id, l.title, la.due_date, la.assigned_at
+       FROM lesson_assignments la
+       JOIN lessons l ON l.id::text = la.lesson_id::text
+       WHERE la.classroom_id::text = $1
+         AND l.deleted_at IS NULL
+       ORDER BY la.assigned_at ASC`,
+      [classroomId],
+    );
+
+    // Progreso de cada alumno por cada lección
+    const progress = await this.dataSource.query(
+      `SELECT
+         lp.student_id::text,
+         lp.lesson_id::text,
+         lp.status,
+         lp.stars,
+         lp.score_pct,
+         lp.xp_earned,
+         lp.completed_at
+       FROM lesson_progress lp
+       WHERE lp.student_id::text IN (
+         SELECT student_id::text FROM classroom_students WHERE classroom_id::text = $1
+       )
+       AND lp.lesson_id::text IN (
+         SELECT lesson_id::text FROM lesson_assignments WHERE classroom_id::text = $1
+       )`,
+      [classroomId],
+    );
 
     return {
       classroom_id: classroomId,
-      students: classroomStudents.map((cs) => ({
-        student_id: cs.student_id,
-        alias: cs.student?.alias,
-        avatar_id: cs.student?.avatar_id,
-      })),
-      lessons: [], // Se completará con el módulo lessons
-      progress: [], // Se completará con el módulo progress
-      note: 'La matriz de progreso estará disponible cuando se implemente el módulo lessons.',
+      classroom_name: classroom.name,
+      students,
+      lessons,
+      progress,
     };
   }
 
@@ -399,20 +420,8 @@ export class ClassroomsService {
   // HELPERS PRIVADOS
   // ─────────────────────────────────────────────────
 
-  private async getTeacherOrFail(userId: string): Promise<TeacherProfile> {
-    const teacher = await this.teacherRepo.findOne({
-      where: { user_id: userId },
-    });
-
-    if (!teacher) {
-      throw new NotFoundException('Perfil de docente no encontrado.');
-    }
-
-    return teacher;
-  }
-
   private async assertOwnership(classroom: Classroom, teacherUserId: string): Promise<void> {
-    const teacher = await this.getTeacherOrFail(teacherUserId);
+    const teacher = await this.teachersService.getProfileOrFail(teacherUserId);
 
     if (classroom.teacher_id !== teacher.id) {
       throw new ForbiddenException('No tenés permiso para acceder a esta clase.');

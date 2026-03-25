@@ -9,7 +9,7 @@ import { Repository } from 'typeorm';
 import { MinigameInstance } from './entities/minigame-instance.entity';
 import { MinigameInstanceAssignment } from './entities/minigame-instance-assignment.entity';
 import { Minigame } from '../minigames/entities/minigame.entity';
-import { TeacherProfile } from '../teachers/entities/teacher-profile.entity';
+import { TeachersService } from '../teachers/teachers.service';
 import { Classroom } from '../classrooms/entities/classroom.entity';
 import { ClassroomStudent } from '../classrooms/entities/classroom-student.entity';
 import { CreateMinigameInstanceDto } from './dto/create-minigame-instance.dto';
@@ -28,8 +28,7 @@ export class MinigameInstancesService {
     @InjectRepository(Minigame)
     private minigameRepo: Repository<Minigame>,
 
-    @InjectRepository(TeacherProfile)
-    private teacherRepo: Repository<TeacherProfile>,
+    private teachersService: TeachersService,
 
     @InjectRepository(Classroom)
     private classroomRepo: Repository<Classroom>,
@@ -39,8 +38,7 @@ export class MinigameInstancesService {
   ) {}
 
   private async getTeacherId(userId: string): Promise<string> {
-    const profile = await this.teacherRepo.findOne({ where: { user_id: userId } });
-    if (!profile) throw new ForbiddenException('Solo los docentes pueden gestionar minijuegos.');
+    const profile = await this.teachersService.getProfileOrFail(userId);
     return profile.id;
   }
 
