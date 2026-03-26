@@ -278,7 +278,8 @@ export class MinigameInstancesService {
     const isFirstPlay = !existingPlay;
 
     // Construir mapa de preguntas para lookup rápido
-    const questionMap = new Map<string, any>(questions.map((q) => [q.id, q]));
+    // content_json uses 'question_id' as the key field
+    const questionMap = new Map<string, any>(questions.map((q) => [q.question_id ?? q.id, q]));
 
     let totalScore = 0;
     let totalXp = 0;
@@ -289,7 +290,7 @@ export class MinigameInstancesService {
       const question = questionMap.get(ans.question_id);
       if (!question) return { ...ans, is_correct: false, points_earned: pointsWrong };
 
-      const timeLimitMs = (question.time_seconds ?? config?.default_time_seconds ?? 30) * 1000;
+      const timeLimitMs = question.time_limit_ms ?? (question.time_seconds ?? config?.default_time_seconds ?? 30) * 1000;
       const isCorrect = ans.selected_option_id !== null && ans.selected_option_id === question.correct_option_id;
 
       let pointsEarned = isCorrect
