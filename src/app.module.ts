@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { LoggerModule } from 'nestjs-pino';
 import { RolesGuard } from './common/guards/roles.guard';
 import { APP_GUARD } from '@nestjs/core';
@@ -26,6 +27,8 @@ import { SessionsModule } from './modules/sessions/sessions.module';
 import { StudentsModule } from './modules/students/students.module';
 import { TeachersModule } from './modules/teachers/teachers.module';
 import { UsersModule } from './modules/users/users.module';
+import { CleanupModule } from './modules/cleanup/cleanup.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -47,6 +50,8 @@ import { UsersModule } from './modules/users/users.module';
     }),
 
     TypeOrmModule.forRootAsync(typeOrmAsyncConfig),
+
+    ScheduleModule.forRoot(),
 
     // Rate limiting global: 100 requests / minuto por IP
     ThrottlerModule.forRoot([
@@ -71,6 +76,8 @@ import { UsersModule } from './modules/users/users.module';
     MinigamesModule,
     MinigameInstancesModule,
     AdminModule,
+    NotificationsModule,
+    CleanupModule,
   ],
   controllers: [AppController],
   providers: [

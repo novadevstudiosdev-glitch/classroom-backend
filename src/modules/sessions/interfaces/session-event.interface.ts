@@ -7,4 +7,5 @@ export interface SessionEvent {
   completed: boolean;
   xp_earned: number;
   occurred_at: string; // ISO 8601
+  content_snapshot?: Record<string, any>[]; // snapshot del content_json al momento de jugar
 }

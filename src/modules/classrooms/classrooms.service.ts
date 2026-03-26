@@ -2,12 +2,17 @@ import { Injectable, NotFoundException, ForbiddenException, ConflictException, B
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
+import { parse } from 'csv-parse/sync';
+import * as bcrypt from 'bcrypt';
 
 import { Classroom } from './entities/classroom.entity';
 import { ClassroomStudent } from './entities/classroom-student.entity';
 import { TeachersService } from '../teachers/teachers.service';
 import { CreateClassroomDto } from './dto/create-classroom.dto';
 import { UpdateClassroomDto } from './dto/update-classroom.dto';
+import { StudentsService } from '../students/students.service';
+import { User } from '../users/entities/user.entity';
+import { StudentProfile } from '../students/entities/student-profile.entity';
 
 // Límite de clases activas para plan gratuito
 const FREE_PLAN_CLASSROOM_LIMIT = 1;
@@ -18,12 +23,19 @@ export class ClassroomsService {
 
   constructor(
     @InjectRepository(Classroom)
-    private classroomRepo: Repository<Classroom>, 
+    private classroomRepo: Repository<Classroom>,
 
     @InjectRepository(ClassroomStudent)
     private classroomStudentRepo: Repository<ClassroomStudent>,
 
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
+
+    @InjectRepository(StudentProfile)
+    private studentProfileRepo: Repository<StudentProfile>,
+
     private teachersService: TeachersService,
+    private studentsService: StudentsService,
     private dataSource: DataSource,
   ) {}
 
@@ -226,9 +238,42 @@ export class ClassroomsService {
       throw new NotFoundException('El alumno no pertenece a esta clase.');
     }
 
-    await this.classroomStudentRepo.remove(classroomStudent);
+    classroomStudent.left_at = new Date();
+    await this.classroomStudentRepo.save(classroomStudent);
+
+    // Soft delete del lesson_progress para lecciones de esta clase
+    await this.softDeleteProgressForClassroom(studentId, classroomId);
 
     return { message: 'Alumno removido de la clase.' };
+  }
+
+  // ─────────────────────────────────────────────────
+  // ALUMNO — SALIR DE UNA CLASE
+  // ─────────────────────────────────────────────────
+
+  async leaveClassroom(classroomId: string, studentUserId: string) {
+    const student = await this.studentsService.getProfile(studentUserId);
+
+    const classroomStudent = await this.classroomStudentRepo.findOne({
+      where: { classroom_id: classroomId, student_id: student.id },
+    });
+
+    if (!classroomStudent) {
+      throw new NotFoundException('No pertenecés a esta clase.');
+    }
+
+    if (classroomStudent.left_at) {
+      throw new ConflictException('Ya saliste de esta clase.');
+    }
+
+    classroomStudent.left_at = new Date();
+    await this.classroomStudentRepo.save(classroomStudent);
+
+    await this.softDeleteProgressForClassroom(student.id, classroomId);
+
+    this.logger.log(`Alumno ${student.id} salió de la clase ${classroomId}`);
+
+    return { message: 'Saliste de la clase correctamente.' };
   }
 
   // ─────────────────────────────────────────────────
@@ -426,6 +471,89 @@ export class ClassroomsService {
     if (classroom.teacher_id !== teacher.id) {
       throw new ForbiddenException('No tenés permiso para acceder a esta clase.');
     }
+  }
+
+  // ─────────────────────────────────────────────────
+  // CSV IMPORT DE ALUMNOS
+  // ─────────────────────────────────────────────────
+
+  async importStudentsCsv(classroomId: string, teacherUserId: string, csvBuffer: Buffer) {
+    const classroom = await this.classroomRepo.findOne({ where: { id: classroomId } });
+    if (!classroom) throw new NotFoundException('Clase no encontrada.');
+    await this.assertOwnership(classroom, teacherUserId);
+
+    let rows: { email: string; alias: string }[];
+    try {
+      rows = parse(csvBuffer, { columns: true, skip_empty_lines: true, trim: true });
+    } catch {
+      throw new BadRequestException('Formato de CSV inválido. Columnas requeridas: email, alias');
+    }
+
+    if (!rows.length) throw new BadRequestException('El CSV está vacío.');
+
+    const results = { imported: 0, already_existed: 0, added_to_class: 0, failed: [] as { row: number; email: string; reason: string }[] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const { email, alias } = rows[i];
+
+      if (!email || !alias) {
+        results.failed.push({ row: i + 2, email: email || '', reason: 'email o alias vacío' });
+        continue;
+      }
+
+      try {
+        let user = await this.userRepo.findOne({ where: { email: email.toLowerCase() } });
+        let profile: StudentProfile | null = null;
+
+        if (!user) {
+          // Crear cuenta con contraseña temporal
+          const tempPassword = randomBytes(8).toString('hex');
+          const password_hash = await bcrypt.hash(tempPassword, 12);
+
+          await this.dataSource.transaction(async (manager) => {
+            user = manager.create(User, { email: email.toLowerCase(), password_hash, role: 'student', is_verified: true });
+            await manager.save(user);
+            profile = manager.create(StudentProfile, { user_id: user!.id, alias, xp_total: 0, level: 1 });
+            await manager.save(profile);
+          });
+
+          results.imported++;
+        } else {
+          profile = await this.studentProfileRepo.findOne({ where: { user_id: user.id } });
+          results.already_existed++;
+        }
+
+        if (!profile) continue;
+
+        const already = await this.classroomStudentRepo.findOne({
+          where: { classroom_id: classroomId, student_id: profile.id },
+        });
+
+        if (!already) {
+          const cs = this.classroomStudentRepo.create({ classroom_id: classroomId, student_id: profile.id });
+          await this.classroomStudentRepo.save(cs);
+          results.added_to_class++;
+        }
+      } catch (err) {
+        results.failed.push({ row: i + 2, email, reason: (err as Error).message });
+      }
+    }
+
+    this.logger.log(`CSV import en clase ${classroomId}: ${results.imported} nuevos, ${results.added_to_class} agregados`);
+    return results;
+  }
+
+  private async softDeleteProgressForClassroom(studentId: string, classroomId: string): Promise<void> {
+    await this.dataSource.query(
+      `UPDATE lesson_progress
+       SET deleted_at = NOW()
+       WHERE deleted_at IS NULL
+         AND student_id::text = $1
+         AND lesson_id::text IN (
+           SELECT lesson_id::text FROM lesson_assignments WHERE classroom_id::text = $2
+         )`,
+      [studentId, classroomId],
+    );
   }
 
   private async generateUniqueInviteCode(): Promise<string> {

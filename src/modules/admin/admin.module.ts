@@ -4,9 +4,11 @@ import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { User } from '../users/entities/user.entity';
 import { Minigame } from '../minigames/entities/minigame.entity';
+import { AuditLog } from './entities/audit-log.entity';
+import { Notification } from '../notifications/entities/notification.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Minigame])],
+  imports: [TypeOrmModule.forFeature([User, Minigame, AuditLog, Notification])],
   controllers: [AdminController],
   providers: [AdminService],
 })

@@ -22,6 +22,7 @@ import { MinigameInstancesService } from './minigame-instances.service';
 import { CreateMinigameInstanceDto } from './dto/create-minigame-instance.dto';
 import { UpdateMinigameInstanceDto } from './dto/update-minigame-instance.dto';
 import { AssignMinigameInstanceDto } from './dto/assign-minigame-instance.dto';
+import { SubmitQuizDto } from './dto/submit-quiz.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -259,6 +260,45 @@ export class MinigameInstancesController {
   }
 
   // ─── ALUMNO ─────────────────────────────────────────────────────────────────
+
+  @Get(':id/play')
+  @Roles('student')
+  @ApiOperation({
+    summary: 'Obtener el quiz para jugar',
+    description: 'Retorna las preguntas SIN correct_option_id. Indica si es el primer juego del alumno.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID de la instancia de minijuego' })
+  @ApiResponse({ status: 200, description: 'Preguntas y configuración del quiz, listas para jugar.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  @ApiResponse({ status: 403, description: 'Solo los alumnos pueden usar este endpoint.' })
+  @ApiResponse({ status: 404, description: 'Minijuego no encontrado.' })
+  getForPlay(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.getForPlay(id, user.profile_id);
+  }
+
+  @Post(':id/submit')
+  @Roles('student')
+  @ApiOperation({
+    summary: 'Enviar respuestas del quiz',
+    description: 'Calcula el puntaje usando fórmula Kahoot (speed bonus). Solo el primer juego otorga XP y cuenta como nota oficial.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID de la instancia de minijuego' })
+  @ApiBody({ type: SubmitQuizDto })
+  @ApiResponse({ status: 201, description: 'Resultado calculado y guardado. Retorna score, XP, respuestas con corrección.' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  @ApiResponse({ status: 403, description: 'Solo los alumnos pueden usar este endpoint.' })
+  @ApiResponse({ status: 404, description: 'Minijuego no encontrado.' })
+  submitQuiz(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubmitQuizDto,
+  ) {
+    return this.service.submitQuiz(id, user.profile_id, dto);
+  }
 
   @Get('by-classroom/:classroomId')
   @Roles('student')

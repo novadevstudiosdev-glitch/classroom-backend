@@ -3,27 +3,36 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MinigameInstance } from './entities/minigame-instance.entity';
 import { MinigameInstanceAssignment } from './entities/minigame-instance-assignment.entity';
+import { MinigameResult } from './entities/minigame-result.entity';
 import { Minigame } from '../minigames/entities/minigame.entity';
 import { TeachersService } from '../teachers/teachers.service';
 import { Classroom } from '../classrooms/entities/classroom.entity';
 import { ClassroomStudent } from '../classrooms/entities/classroom-student.entity';
+import { StudentProfile } from '../students/entities/student-profile.entity';
 import { CreateMinigameInstanceDto } from './dto/create-minigame-instance.dto';
 import { UpdateMinigameInstanceDto } from './dto/update-minigame-instance.dto';
 import { AssignMinigameInstanceDto } from './dto/assign-minigame-instance.dto';
+import { SubmitQuizDto } from './dto/submit-quiz.dto';
 
 @Injectable()
 export class MinigameInstancesService {
+  private readonly logger = new Logger(MinigameInstancesService.name);
+
   constructor(
     @InjectRepository(MinigameInstance)
     private instanceRepo: Repository<MinigameInstance>,
 
     @InjectRepository(MinigameInstanceAssignment)
     private assignmentRepo: Repository<MinigameInstanceAssignment>,
+
+    @InjectRepository(MinigameResult)
+    private resultRepo: Repository<MinigameResult>,
 
     @InjectRepository(Minigame)
     private minigameRepo: Repository<Minigame>,
@@ -35,6 +44,9 @@ export class MinigameInstancesService {
 
     @InjectRepository(ClassroomStudent)
     private classroomStudentRepo: Repository<ClassroomStudent>,
+
+    @InjectRepository(StudentProfile)
+    private studentRepo: Repository<StudentProfile>,
   ) {}
 
   private async getTeacherId(userId: string): Promise<string> {
@@ -198,5 +210,152 @@ export class MinigameInstancesService {
     });
 
     return assignments.map((a) => a.instance);
+  }
+
+  // ─── QUIZ: PLAY & SUBMIT ─────────────────────────────────────────────────────
+
+  /**
+   * Retorna el minijuego listo para jugar:
+   * - content_json con las preguntas pero SIN correct_option_id
+   * - config_json completo
+   * - indica si el alumno ya jugó antes (is_first_play)
+   */
+  async getForPlay(instanceId: string, studentProfileId: string) {
+    const instance = await this.instanceRepo.findOne({ where: { id: instanceId } });
+    if (!instance) throw new NotFoundException('Minijuego no encontrado.');
+
+    const previousPlay = await this.resultRepo.findOne({
+      where: { instance_id: instanceId, student_id: studentProfileId },
+      order: { played_at: 'DESC' },
+    });
+
+    // Quitar correct_option_id de cada pregunta antes de enviar al cliente
+    const questionsForPlay = (instance.content_json as any[]).map((q) => {
+      const { correct_option_id, ...rest } = q;
+      void correct_option_id; // suprimir warning de variable no usada
+      return rest;
+    });
+
+    // Si config pide shuffle, mezclar preguntas (semilla aleatoria por sesión)
+    const config = instance.config_json as any;
+    if (config?.shuffle_questions) {
+      questionsForPlay.sort(() => Math.random() - 0.5);
+    }
+
+    return {
+      id: instance.id,
+      title: instance.title,
+      description: instance.description,
+      questions: questionsForPlay,
+      config: instance.config_json,
+      is_first_play: !previousPlay,
+      play_count: previousPlay ? 1 : 0, // simplificado, cuenta plays anteriores
+    };
+  }
+
+  /**
+   * Calcula el resultado del quiz:
+   * - Kahoot scoring: points * (0.5 + 0.5 * timeRatio)
+   * - XP solo en el primer juego, multiplicado por xp_multiplier del config
+   * - Actualiza xp_total y level del alumno si es primer juego
+   */
+  async submitQuiz(instanceId: string, studentProfileId: string, dto: SubmitQuizDto) {
+    const instance = await this.instanceRepo.findOne({ where: { id: instanceId } });
+    if (!instance) throw new NotFoundException('Minijuego no encontrado.');
+
+    const config = instance.config_json as any;
+    const questions = instance.content_json as any[];
+
+    const pointsCorrect: number = config?.points_correct ?? 100;
+    const pointsWrong: number = config?.points_wrong ?? 0;
+    const xpMultiplier: number = config?.xp_multiplier ?? 1;
+    const maxXp: number = config?.max_xp ?? 500;
+
+    // ¿Es el primer juego?
+    const existingPlay = await this.resultRepo.findOne({
+      where: { instance_id: instanceId, student_id: studentProfileId },
+    });
+    const isFirstPlay = !existingPlay;
+
+    // Construir mapa de preguntas para lookup rápido
+    const questionMap = new Map<string, any>(questions.map((q) => [q.id, q]));
+
+    let totalScore = 0;
+    let totalXp = 0;
+    let correctCount = 0;
+    const maxScore = questions.length * pointsCorrect;
+
+    const processedAnswers = dto.answers.map((ans) => {
+      const question = questionMap.get(ans.question_id);
+      if (!question) return { ...ans, is_correct: false, points_earned: pointsWrong };
+
+      const timeLimitMs = (question.time_seconds ?? config?.default_time_seconds ?? 30) * 1000;
+      const isCorrect = ans.selected_option_id !== null && ans.selected_option_id === question.correct_option_id;
+
+      let pointsEarned = isCorrect
+        ? Math.round(pointsCorrect * (0.5 + 0.5 * Math.max(0, (timeLimitMs - ans.time_taken_ms) / timeLimitMs)))
+        : pointsWrong;
+
+      pointsEarned = Math.max(0, pointsEarned);
+
+      if (isCorrect) {
+        correctCount++;
+        totalScore += pointsEarned;
+        totalXp += question.xp_value ?? 10;
+      }
+
+      return {
+        question_id: ans.question_id,
+        selected_option_id: ans.selected_option_id,
+        correct_option_id: question.correct_option_id,
+        is_correct: isCorrect,
+        time_taken_ms: ans.time_taken_ms,
+        points_earned: pointsEarned,
+      };
+    });
+
+    // XP con multiplicador y cap, solo primer juego
+    const xpEarned = isFirstPlay ? Math.min(Math.round(totalXp * xpMultiplier), maxXp) : 0;
+
+    // Guardar resultado
+    const result = this.resultRepo.create({
+      instance_id: instanceId,
+      student_id: studentProfileId,
+      score: totalScore,
+      max_score: maxScore,
+      xp_earned: xpEarned,
+      correct_answers: correctCount,
+      total_questions: questions.length,
+      time_taken_seconds: dto.time_taken_seconds,
+      answers: processedAnswers,
+      content_snapshot: questions,
+      is_first_play: isFirstPlay,
+    });
+
+    await this.resultRepo.save(result);
+
+    // Actualizar XP y level del alumno si es primer juego
+    if (isFirstPlay && xpEarned > 0) {
+      const student = await this.studentRepo.findOne({ where: { id: studentProfileId } });
+      if (student) {
+        student.xp_total += xpEarned;
+        student.level = Math.floor(student.xp_total / 100) + 1;
+        await this.studentRepo.save(student);
+        this.logger.log(`Alumno ${studentProfileId} ganó ${xpEarned} XP — nuevo total: ${student.xp_total} (lvl ${student.level})`);
+      }
+    }
+
+    this.logger.log(`Quiz ${instanceId} completado por ${studentProfileId} — score: ${totalScore}/${maxScore}, xp: ${xpEarned}`);
+
+    return {
+      score: totalScore,
+      max_score: maxScore,
+      correct_answers: correctCount,
+      total_questions: questions.length,
+      xp_earned: xpEarned,
+      is_first_play: isFirstPlay,
+      time_taken_seconds: dto.time_taken_seconds,
+      answers: processedAnswers,
+    };
   }
 }

@@ -1,4 +1,6 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, ParseUUIDPipe, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, ParseUUIDPipe, HttpCode, HttpStatus, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
 
 import { ClassroomsService } from './classrooms.service';
@@ -125,6 +127,18 @@ export class ClassroomsController {
     return this.classroomsService.regenerateInviteCode(id, user.sub);
   }
 
+  @Delete(':id/leave')
+  @Roles('student')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'El alumno sale de una clase' })
+  @ApiParam({ name: 'id', description: 'UUID de la clase' })
+  @ApiResponse({ status: 200, description: 'Saliste de la clase. El historial queda archivado.' })
+  @ApiResponse({ status: 404, description: 'No pertenecés a esta clase.' })
+  @ApiResponse({ status: 409, description: 'Ya saliste de esta clase.' })
+  leaveClassroom(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
+    return this.classroomsService.leaveClassroom(id, user.sub);
+  }
+
   @Delete(':id/students/:studentId')
   @Roles('teacher')
   @HttpCode(HttpStatus.OK)
@@ -148,6 +162,26 @@ export class ClassroomsController {
   @ApiResponse({ status: 404, description: 'Clase no encontrada.' })
   getStats(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
     return this.classroomsService.getStats(id, user.sub);
+  }
+
+  @Post(':id/students/import')
+  @Roles('teacher')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @ApiOperation({
+    summary: 'Importar alumnos desde CSV',
+    description: 'CSV con columnas: email, alias. Crea cuentas nuevas y agrega a los existentes directamente a la clase.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID de la clase' })
+  @ApiResponse({ status: 201, description: 'Resultado del import: imported, already_existed, added_to_class, failed.' })
+  importStudents(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: any,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Archivo CSV requerido.');
+    return this.classroomsService.importStudentsCsv(id, user.sub, file.buffer);
   }
 
   @Get(':id/progress')

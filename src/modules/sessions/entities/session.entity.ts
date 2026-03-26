@@ -17,6 +17,9 @@ export class Session {
   @Column({ type: 'uuid', nullable: true })
   classroom_id: string | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  lesson_id: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   started_at: Date;
 

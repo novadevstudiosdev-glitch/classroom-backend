@@ -207,9 +207,7 @@ export class AuthService {
       const link = manager.create(ParentStudent, {
         parent_id: profile.id,
         student_id: studentProfile.id,
-        is_confirmed: false,
-        confirmation_token,
-        confirmation_token_expires_at: confirmationExpires,
+        status: 'pending',
       });
       await manager.save(link);
 
@@ -389,6 +387,77 @@ export class AuthService {
     this.logger.log(`Email verificado: ${user.email}`);
 
     return { message: '¡Email verificado! Ya podés iniciar sesión.' };
+  }
+
+  // ─────────────────────────────────────────────────
+  // FORGOT / RESET PASSWORD
+  // ─────────────────────────────────────────────────
+
+  async forgotPassword(email: string) {
+    const user = await this.userRepo.findOne({ where: { email } });
+
+    // Siempre devolver el mismo mensaje para no revelar si el email existe
+    if (!user || user.deleted_at || !user.is_verified) {
+      return { message: 'Si el email existe, recibirás un link para restablecer tu contraseña.' };
+    }
+
+    const token = randomBytes(32).toString('hex');
+    const expires = new Date();
+    expires.setHours(expires.getHours() + 1);
+
+    await this.userRepo.update(user.id, {
+      password_reset_token: token,
+      password_reset_token_expires_at: expires,
+    });
+
+    await this.emailService.sendPasswordResetEmail(user.email, token);
+
+    this.logger.log(`Password reset solicitado: ${user.email}`);
+
+    return { message: 'Si el email existe, recibirás un link para restablecer tu contraseña.' };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const user = await this.userRepo.findOne({
+      where: { password_reset_token: token },
+    });
+
+    if (!user) throw new BadRequestException('Token inválido o expirado.');
+    if (!user.password_reset_token_expires_at || user.password_reset_token_expires_at < new Date()) {
+      throw new BadRequestException('Token inválido o expirado.');
+    }
+
+    const password_hash = await bcrypt.hash(newPassword, 12);
+
+    await this.userRepo.update(user.id, {
+      password_hash,
+      password_reset_token: null,
+      password_reset_token_expires_at: null,
+      refresh_token_hash: null, // invalidar todas las sesiones activas
+    });
+
+    this.logger.log(`Contraseña restablecida: ${user.email}`);
+
+    return { message: 'Contraseña restablecida correctamente. Ya podés iniciar sesión.' };
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuario no encontrado.');
+
+    if (!user.password_hash) {
+      throw new BadRequestException('Esta cuenta usa autenticación con Google y no tiene contraseña.');
+    }
+
+    const valid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!valid) throw new UnauthorizedException('Contraseña actual incorrecta.');
+
+    const password_hash = await bcrypt.hash(newPassword, 12);
+    await this.userRepo.update(userId, { password_hash });
+
+    this.logger.log(`Contraseña cambiada: ${user.email}`);
+
+    return { message: 'Contraseña actualizada correctamente.' };
   }
 
   async logout(userId: string, jti: string, exp: number) {

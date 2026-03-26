@@ -1,3 +1,9 @@
+import { webcrypto } from 'crypto';
+// Node.js 18 doesn't expose crypto as a global — polyfill for @nestjs/schedule
+if (!globalThis.crypto) {
+  (globalThis as any).crypto = webcrypto;
+}
+
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -28,8 +34,27 @@ async function bootstrap() {
   const apiPrefix = process.env.API_PREFIX ?? 'api';
   app.setGlobalPrefix(apiPrefix);
 
+  const extraOrigins = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    ...extraOrigins,
+  ].filter((o): o is string => !!o);
+
   app.enableCors({
-    origin: process.env.FRONTEND_URL,
+    origin: (origin, cb) => {
+      // Always allow localhost/127.0.0.1 (local dev) and no-origin (Postman/curl)
+      if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return cb(null, true);
+      }
+      if (allowedOrigins.includes(origin)) {
+        return cb(null, true);
+      }
+      cb(new Error(`CORS: origin not allowed — ${origin}`));
+    },
     credentials: true,
   });
 
