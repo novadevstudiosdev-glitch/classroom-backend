@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MinigameInstance } from './entities/minigame-instance.entity';
 import { MinigameInstanceAssignment } from './entities/minigame-instance-assignment.entity';
+import { MinigameResult } from './entities/minigame-result.entity';
 import { Minigame } from '../minigames/entities/minigame.entity';
 import { Classroom } from '../classrooms/entities/classroom.entity';
 import { ClassroomStudent } from '../classrooms/entities/classroom-student.entity';
+import { StudentProfile } from '../students/entities/student-profile.entity';
 import { MinigameInstancesController } from './minigame-instances.controller';
 import { MinigameInstancesService } from './minigame-instances.service';
 import { TeachersModule } from '../teachers/teachers.module';
@@ -14,9 +16,11 @@ import { TeachersModule } from '../teachers/teachers.module';
     TypeOrmModule.forFeature([
       MinigameInstance,
       MinigameInstanceAssignment,
+      MinigameResult,
       Minigame,
       Classroom,
       ClassroomStudent,
+      StudentProfile,
     ]),
     TeachersModule,
   ],
