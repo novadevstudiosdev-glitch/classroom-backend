@@ -1,3 +1,9 @@
+import { webcrypto } from 'crypto';
+// Node.js 18 doesn't expose crypto as a global — polyfill for @nestjs/schedule
+if (!globalThis.crypto) {
+  (globalThis as any).crypto = webcrypto;
+}
+
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
