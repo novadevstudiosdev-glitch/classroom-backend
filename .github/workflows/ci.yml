@@ -11,6 +11,7 @@ jobs:
   test:
     name: Lint, Build & E2E Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout código
@@ -23,7 +24,7 @@ jobs:
           cache: 'npm'
 
       - name: Instalar dependencias
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Lint
         run: npm run lint
@@ -38,7 +39,7 @@ jobs:
           API_PREFIX: api
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          JWT_EXPIRES_IN: 1h
+          JWT_EXPIRES_IN: 15m
           JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
           JWT_REFRESH_EXPIRES_IN: 7d
           REDIS_URL: ${{ secrets.REDIS_URL }}

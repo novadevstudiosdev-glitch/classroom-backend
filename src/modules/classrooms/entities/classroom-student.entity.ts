@@ -25,6 +25,9 @@ export class ClassroomStudent {
   @Column({ type: 'timestamptz', nullable: true })
   last_activity: Date;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  left_at: Date | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   joined_at: Date;
 }

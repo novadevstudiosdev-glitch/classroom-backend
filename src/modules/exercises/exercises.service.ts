@@ -1,11 +1,11 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { Exercise } from './entities/exercise.entity';
 import { Lesson } from '../lessons/entities/lesson.entity';
-import { TeacherProfile } from '../teachers/entities/teacher-profile.entity';
+import { TeachersService } from '../teachers/teachers.service';
 import { CreateExerciseDto, CONFIG_SCHEMA_MAP } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { ExerciseCorrectorService } from './answer/exercise-corrector.service';
@@ -22,15 +22,12 @@ export class ExercisesService {
     @InjectRepository(Lesson)
     private lessonRepo: Repository<Lesson>,
 
-    @InjectRepository(TeacherProfile)
-    private teacherRepo: Repository<TeacherProfile>,
-
+    private teachersService: TeachersService,
     private correctorService: ExerciseCorrectorService,
   ) {}
 
   private async getTeacherId(userId: string): Promise<string> {
-    const profile = await this.teacherRepo.findOne({ where: { user_id: userId } });
-    if (!profile) throw new ForbiddenException('Solo los docentes pueden gestionar ejercicios.');
+    const profile = await this.teachersService.getProfileOrFail(userId);
     return profile.id;
   }
 
@@ -45,6 +42,23 @@ export class ExercisesService {
       const messages = errors.flatMap((e) => Object.values(e.constraints ?? {}));
       throw new BadRequestException(`config_json inválido para tipo "${type}": ${messages.join(', ')}`);
     }
+  }
+
+  async findByLesson(userId: string, role: string, lessonId: string): Promise<Exercise[]> {
+    if (role === 'teacher') {
+      const teacher_id = await this.getTeacherId(userId);
+      const lesson = await this.lessonRepo.findOne({ where: { id: lessonId, teacher_id } });
+      if (!lesson) throw new NotFoundException('Lección no encontrada.');
+    } else {
+      // Alumno: la lección debe estar publicada
+      const lesson = await this.lessonRepo.findOne({ where: { id: lessonId, status: 'published' } });
+      if (!lesson) throw new NotFoundException('Lección no encontrada.');
+    }
+
+    return this.exerciseRepo.find({
+      where: { lesson_id: lessonId },
+      order: { order: 'ASC' },
+    });
   }
 
   async create(userId: string, dto: CreateExerciseDto): Promise<Exercise> {

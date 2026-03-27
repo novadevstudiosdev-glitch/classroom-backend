@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
 } from 'typeorm';
+import { SessionEvent } from '../interfaces/session-event.interface';
 
 @Entity('sessions')
 export class Session {
@@ -16,6 +17,9 @@ export class Session {
   @Column({ type: 'uuid', nullable: true })
   classroom_id: string | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  lesson_id: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   started_at: Date;
 
@@ -23,5 +27,5 @@ export class Session {
   ended_at: Date | null;
 
   @Column({ type: 'jsonb', default: [] })
-  events: Record<string, any>[];
+  events: SessionEvent[];
 }

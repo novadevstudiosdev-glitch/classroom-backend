@@ -58,6 +58,42 @@ export class EmailService {
     }
   }
 
+  async sendPasswordResetEmail(to: string, token: string): Promise<void> {
+    if (!this.enabled || !this.resend) {
+      this.logger.warn(`Envio de reset de contraseña omitido (Resend deshabilitado) para: ${to}`);
+      return;
+    }
+
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
+    const resetUrl = `${frontendUrl}/auth/reset-password?token=${token}`;
+
+    try {
+      await this.resend.emails.send({
+        from: this.fromAddress,
+        to,
+        subject: 'Restablecer contraseña en NovaDev Studios',
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2>Restablecer contraseña</h2>
+            <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta.</p>
+            <a
+              href="${resetUrl}"
+              style="display: inline-block; padding: 12px 24px; background-color: #7c3aed; color: white; border-radius: 8px; text-decoration: none; font-weight: bold;"
+            >
+              Restablecer contraseña
+            </a>
+            <p style="margin-top: 16px; color: #6b7280; font-size: 14px;">
+              El link expira en 1 hora. Si no solicitaste esto, ignora este email.
+            </p>
+          </div>
+        `,
+      });
+      this.logger.log(`Email de reset de contraseña enviado a: ${to}`);
+    } catch (error) {
+      this.logger.error(`Error al enviar email de reset a ${to}: ${error?.message}`);
+    }
+  }
+
   async sendParentLinkConfirmation(to: string, parentName: string, studentAlias: string, token: string): Promise<void> {
     if (!this.enabled || !this.resend) {
       this.logger.warn(`Envio de vinculacion omitido (Resend deshabilitado) para: ${to}`);

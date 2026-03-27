@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TeacherProfile } from './entities/teacher-profile.entity';
@@ -20,6 +20,12 @@ export class TeachersService {
       throw new NotFoundException('Perfil de docente no encontrado.');
     }
 
+    return profile;
+  }
+
+  async getProfileOrFail(userId: string): Promise<TeacherProfile> {
+    const profile = await this.teacherRepo.findOne({ where: { user_id: userId } });
+    if (!profile) throw new ForbiddenException('Solo los docentes pueden realizar esta acción.');
     return profile;
   }
 

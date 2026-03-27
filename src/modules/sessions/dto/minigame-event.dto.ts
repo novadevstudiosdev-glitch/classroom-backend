@@ -1,14 +1,19 @@
-import { IsUUID, IsNumber, IsBoolean, Min } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsUUID, IsNumber, IsBoolean, Min, IsOptional } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class MinigameEventDto {
   @ApiProperty({ description: 'ID de la sesión activa' })
   @IsUUID()
   session_id: string;
 
-  @ApiProperty({ description: 'ID del minijuego jugado' })
+  @ApiProperty({ description: 'ID del minijuego (template) jugado' })
   @IsUUID()
   minigame_id: string;
+
+  @ApiPropertyOptional({ description: 'ID de la instancia de minijuego (para guardar el snapshot del contenido)' })
+  @IsOptional()
+  @IsUUID()
+  instance_id?: string;
 
   @ApiProperty({ description: 'Puntaje obtenido', example: 850 })
   @IsNumber()

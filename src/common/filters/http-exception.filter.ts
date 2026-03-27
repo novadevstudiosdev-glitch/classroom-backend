@@ -24,12 +24,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     // Extraer el mensaje: puede ser string o array (validation errors)
     let message: string | string[];
+    let data: unknown = null;
     if (isHttpException) {
       if (typeof exceptionResponse === 'string') {
         message = exceptionResponse;
       } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
         const body = exceptionResponse as Record<string, any>;
-        message = body.message ?? exception.message;
+
+        // Terminus HealthCheck (503): preserve details in `data` to help debugging/monitoring
+        const isHealthCheckBody =
+          typeof body.status === 'string' &&
+          (body.info !== undefined || body.error !== undefined || body.details !== undefined);
+
+        if (isHealthCheckBody) {
+          message = 'Uno o más servicios con problemas.';
+          data = body;
+        } else {
+          message = body.message ?? exception.message;
+        }
       } else {
         message = exception.message;
       }
@@ -46,8 +58,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       statusCode: status,
       message,
-      data: null,
+      data,
     });
   }
 }
-

@@ -8,8 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Lesson } from './entities/lesson.entity';
 import { LessonAssignment } from './entities/lesson-assignment.entity';
-import { TeacherProfile } from '../teachers/entities/teacher-profile.entity';
 import { Classroom } from '../classrooms/entities/classroom.entity';
+import { TeachersService } from '../teachers/teachers.service';
 import { CreateLessonDto } from './dto/create-lesson.dto';
 import { UpdateLessonDto } from './dto/update-lesson.dto';
 import { AssignLessonDto } from './dto/assign-lesson.dto';
@@ -26,17 +26,14 @@ export class LessonsService {
     @InjectRepository(LessonAssignment)
     private assignmentRepo: Repository<LessonAssignment>,
 
-    @InjectRepository(TeacherProfile)
-    private teacherRepo: Repository<TeacherProfile>,
+    private teachersService: TeachersService,
 
     @InjectRepository(Classroom)
     private classroomRepo: Repository<Classroom>,
   ) {}
 
-  // Obtener el teacher_id a partir del user_id (sub del JWT)
   private async getTeacherId(userId: string): Promise<string> {
-    const profile = await this.teacherRepo.findOne({ where: { user_id: userId } });
-    if (!profile) throw new ForbiddenException('Solo los docentes pueden gestionar lecciones.');
+    const profile = await this.teachersService.getProfileOrFail(userId);
     return profile.id;
   }
 
@@ -136,6 +133,40 @@ export class LessonsService {
     this.logger.log(`Lección eliminada (soft): ${lessonId}`);
 
     return { message: 'Lección eliminada correctamente.' };
+  }
+
+  async closeAssignment(assignmentId: string, userId: string) {
+    const teacher_id = await this.getTeacherId(userId);
+    const assignment = await this.assignmentRepo.findOne({
+      where: { id: assignmentId },
+      relations: ['lesson'],
+    });
+
+    if (!assignment) throw new NotFoundException('Asignación no encontrada.');
+    if (assignment.lesson.teacher_id !== teacher_id) throw new ForbiddenException('No tenés permiso.');
+    if (assignment.is_closed) throw new ForbiddenException('La asignación ya está cerrada.');
+
+    assignment.is_closed = true;
+    await this.assignmentRepo.save(assignment);
+
+    return { message: 'Lección cerrada. Los alumnos ya no pueden completarla.' };
+  }
+
+  async reopenAssignment(assignmentId: string, userId: string) {
+    const teacher_id = await this.getTeacherId(userId);
+    const assignment = await this.assignmentRepo.findOne({
+      where: { id: assignmentId },
+      relations: ['lesson'],
+    });
+
+    if (!assignment) throw new NotFoundException('Asignación no encontrada.');
+    if (assignment.lesson.teacher_id !== teacher_id) throw new ForbiddenException('No tenés permiso.');
+    if (!assignment.is_closed) throw new ForbiddenException('La asignación no está cerrada.');
+
+    assignment.is_closed = false;
+    await this.assignmentRepo.save(assignment);
+
+    return { message: 'Lección reabierta. Los alumnos pueden volver a completarla.' };
   }
 
   async assign(userId: string, lessonId: string, dto: AssignLessonDto) {
