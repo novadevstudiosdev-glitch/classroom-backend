@@ -22,23 +22,40 @@ const dataSource = new DataSource({
   synchronize: false,
 });
 
-const MOCK_MINIGAME: Partial<Minigame> = {
-  slug: 'word-runner-v1',
-  title: 'Word Runner',
-  description: 'Atrapá las palabras correctas mientras corren por la pantalla. ¡Cuidado con las trampas!',
-  type: 'word_runner',
-  is_active: true,
-  config_json: {
-    duration_seconds: 60,
-    lives: 3,
-    speed_initial: 1,
-    speed_increment: 0.1,
-    xp_per_correct: 5,
-    categories: ['animales', 'colores', 'números'],
-    difficulty: 'easy',
-    phaser_scene: 'WordRunnerScene',
+const MINIGAMES: Partial<Minigame>[] = [
+  {
+    slug: 'quiz-rush-v1',
+    title: 'Quiz Rush',
+    description: 'Respondé preguntas de opción múltiple contra el reloj. ¡El tiempo importa!',
+    type: 'quiz_rush',
+    is_active: true,
+    config_json: {
+      default_time_seconds: 20,
+      points_correct: 100,
+      points_wrong: 0,
+      xp_multiplier: 1,
+      max_xp: 500,
+      shuffle_questions: false,
+    },
   },
-};
+  {
+    slug: 'word-runner-v1',
+    title: 'Word Runner',
+    description: 'Atrapá las palabras correctas mientras corren por la pantalla. ¡Cuidado con las trampas!',
+    type: 'word_runner',
+    is_active: true,
+    config_json: {
+      duration_seconds: 60,
+      lives: 3,
+      speed_initial: 1,
+      speed_increment: 0.1,
+      xp_per_correct: 5,
+      categories: ['animales', 'colores', 'números'],
+      difficulty: 'easy',
+      phaser_scene: 'WordRunnerScene',
+    },
+  },
+];
 
 async function seed() {
   await dataSource.initialize();
@@ -46,16 +63,16 @@ async function seed() {
 
   const repo = dataSource.getRepository(Minigame);
 
-  const existing = await repo.findOne({ where: { slug: MOCK_MINIGAME.slug } });
-
-  if (existing) {
-    console.log(`→ Minijuego "${MOCK_MINIGAME.slug}" ya existe, actualizando...`);
-    await repo.update(existing.id, MOCK_MINIGAME);
-    console.log(`✓ Actualizado: ${existing.id}`);
-  } else {
-    const minigame = repo.create(MOCK_MINIGAME);
-    await repo.save(minigame);
-    console.log(`✓ Creado: ${minigame.id} — ${minigame.title}`);
+  for (const data of MINIGAMES) {
+    const existing = await repo.findOne({ where: { slug: data.slug } });
+    if (existing) {
+      await repo.update(existing.id, data);
+      console.log(`✓ Actualizado: ${data.slug} (${existing.id})`);
+    } else {
+      const m = repo.create(data);
+      await repo.save(m);
+      console.log(`✓ Creado: ${data.slug} (${m.id})`);
+    }
   }
 
   await dataSource.destroy();
