@@ -224,7 +224,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const roomCode = this.socketRoom.get(client.id);
     if (!roomCode) return;
     const room = this.rooms.get(roomCode);
-    if (!room || room.status !== 'waiting') return;
+    if (!room) return;
     const player = room.players.get(client.id);
     if (!player) return;
 
@@ -232,6 +232,51 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!text) return;
 
     this.server.to(roomCode).emit('chat', { system: false, alias: player.alias, text });
+  }
+
+  // ── react ─────────────────────────────────────────────────────────────────
+  // Payload: { emoji: string }
+
+  @SubscribeMessage('react')
+  handleReact(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { emoji: string },
+  ) {
+    const roomCode = this.socketRoom.get(client.id);
+    if (!roomCode) return;
+    const room = this.rooms.get(roomCode);
+    if (!room) return;
+    const player = room.players.get(client.id);
+    if (!player) return;
+
+    const allowed = ['🔥','❤️','😂','😮','👏','💀'];
+    const emoji = allowed.includes(data.emoji) ? data.emoji : '🔥';
+    this.server.to(roomCode).emit('reaction', { alias: player.alias, emoji });
+  }
+
+  // ── restart-room (host only) ──────────────────────────────────────────────
+
+  @SubscribeMessage('restart-room')
+  handleRestartRoom(@ConnectedSocket() client: Socket) {
+    const roomCode = this.socketRoom.get(client.id);
+    if (!roomCode) return;
+    const room = this.rooms.get(roomCode);
+    if (!room || room.hostSocketId !== client.id) return;
+
+    if (room.timer) clearTimeout(room.timer);
+    room.status = 'waiting';
+    room.currentQ = 0;
+    room.selectedInstanceId = null;
+    room.selectedTitle = '';
+    room.questions = [];
+
+    for (const p of room.players.values()) {
+      p.score = 0;
+      p.answeredThisRound = false;
+    }
+
+    this.server.to(roomCode).emit('room-restarted', { roomCode, roomName: room.roomName });
+    this.emitRoomUpdate(roomCode, room);
   }
 
   // ── start-game ────────────────────────────────────────────────────────────
@@ -292,6 +337,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       correctOptionId: q.correct_option_id,
       score: player.score,
     });
+
+    // Notificar a todos que este jugador ya respondió (sin revelar la respuesta)
+    this.server.to(roomCode).emit('player-answered', { alias: player.alias });
 
     const allAnswered = [...room.players.values()].every(p => p.answeredThisRound);
     if (allAnswered) {
