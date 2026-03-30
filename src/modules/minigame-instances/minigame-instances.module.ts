@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule } from '@nestjs/config';
 import { MinigameInstance } from './entities/minigame-instance.entity';
 import { MinigameInstanceAssignment } from './entities/minigame-instance-assignment.entity';
 import { MinigameResult } from './entities/minigame-result.entity';
@@ -9,10 +10,12 @@ import { ClassroomStudent } from '../classrooms/entities/classroom-student.entit
 import { StudentProfile } from '../students/entities/student-profile.entity';
 import { MinigameInstancesController } from './minigame-instances.controller';
 import { MinigameInstancesService } from './minigame-instances.service';
+import { AIService } from './ai.service';
 import { TeachersModule } from '../teachers/teachers.module';
 
 @Module({
   imports: [
+    ConfigModule,
     TypeOrmModule.forFeature([
       MinigameInstance,
       MinigameInstanceAssignment,
@@ -25,6 +28,6 @@ import { TeachersModule } from '../teachers/teachers.module';
     TeachersModule,
   ],
   controllers: [MinigameInstancesController],
-  providers: [MinigameInstancesService],
+  providers: [MinigameInstancesService, AIService],
 })
 export class MinigameInstancesModule {}
