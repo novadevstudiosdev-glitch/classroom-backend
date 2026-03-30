@@ -171,9 +171,15 @@ ${catRule}
         title: parsed.title ?? `Quiz: ${topic}`,
         questions: questions.map((q: any) => {
           const opts: string[] = Array.isArray(q.options) ? q.options : [];
+          const mapped = opts.map((o: string, i: number) => ({ id: String(i), text: o }));
+          // Shuffle options so the correct answer isn't always first
+          for (let i = mapped.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [mapped[i], mapped[j]] = [mapped[j], mapped[i]];
+          }
           return {
             text: q.question ?? q.text ?? '',
-            options: opts.map((o: string, i: number) => ({ id: String(i), text: o })),
+            options: mapped,
             correct_option_id: String(q.correct_option_id ?? '0'),
             points_correct: q.points_correct ?? 100,
             time_limit_ms: q.time_limit_ms ?? 20000,
@@ -195,9 +201,15 @@ ${catRule}
           icon: c.icon ?? CAT_ICONS[ci % CAT_ICONS.length],
           questions: (c.questions ?? []).map((q: any) => {
             const opts: string[] = Array.isArray(q.options) ? q.options : [];
+            const mapped = opts.map((o: string, i: number) => ({ id: String(i), text: o }));
+            // Shuffle options so the correct answer isn't always first
+            for (let i = mapped.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [mapped[i], mapped[j]] = [mapped[j], mapped[i]];
+            }
             return {
               text: q.question ?? q.text ?? '',
-              options: opts.map((o: string, i: number) => ({ id: String(i), text: o })),
+              options: mapped,
               correct_option_id: String(q.correct_option_id ?? '0'),
             };
           }),

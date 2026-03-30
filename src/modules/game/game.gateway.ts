@@ -728,6 +728,54 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.pqProcessAnswer(roomCode, room, data.optionId);
   }
 
+  // ── kick-player ───────────────────────────────────────────────────────────
+
+  @SubscribeMessage('kick-player')
+  handleKickPlayer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { alias: string },
+  ) {
+    const roomCode = this.socketRoom.get(client.id);
+    if (!roomCode) return;
+    const room = this.rooms.get(roomCode);
+    if (!room || room.hostSocketId !== client.id || room.status !== 'waiting') return;
+
+    const target = [...room.players.values()].find(p => p.alias === data.alias && p.socketId !== client.id);
+    if (!target) return;
+
+    const targetSocket = this.server.sockets.sockets.get(target.socketId);
+    if (targetSocket) {
+      targetSocket.emit('kicked', { message: 'Fuiste expulsado de la sala.' });
+      targetSocket.leave(roomCode);
+    }
+    room.players.delete(target.socketId);
+    this.socketRoom.delete(target.socketId);
+
+    this.server.to(roomCode).emit('chat', { system: true, alias: target.alias, text: `${target.alias} fue expulsado. 🚫` });
+    this.emitRoomUpdate(roomCode, room);
+    this.emitRoomsUpdate();
+  }
+
+  // ── promote-player ────────────────────────────────────────────────────────
+
+  @SubscribeMessage('promote-player')
+  handlePromotePlayer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { alias: string },
+  ) {
+    const roomCode = this.socketRoom.get(client.id);
+    if (!roomCode) return;
+    const room = this.rooms.get(roomCode);
+    if (!room || room.hostSocketId !== client.id || room.status !== 'waiting') return;
+
+    const target = [...room.players.values()].find(p => p.alias === data.alias && p.socketId !== client.id);
+    if (!target) return;
+
+    room.hostSocketId = target.socketId;
+    this.server.to(roomCode).emit('chat', { system: true, alias: target.alias, text: `${target.alias} es el nuevo líder. 👑` });
+    this.emitRoomUpdate(roomCode, room);
+  }
+
   // ── submit-answer ─────────────────────────────────────────────────────────
 
   @SubscribeMessage('submit-answer')
@@ -887,6 +935,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
     this.server.to(roomCode).emit('pq-answer-result', {
       correct,
+      answered: optionId !== null,   // false = timeout, true = answered (correct or wrong)
       correctOptionId: room.pqCurrentQuestion?.correct_option_id ?? '',
       answererAlias: room.players.get(room.pqTurn!)?.alias ?? '',
       scoreboard,
