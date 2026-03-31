@@ -29,6 +29,7 @@ import { TeachersModule } from './modules/teachers/teachers.module';
 import { UsersModule } from './modules/users/users.module';
 import { CleanupModule } from './modules/cleanup/cleanup.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { GameModule } from './modules/game/game.module';
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     AdminModule,
     NotificationsModule,
     CleanupModule,
+    GameModule,
   ],
   controllers: [AppController],
   providers: [

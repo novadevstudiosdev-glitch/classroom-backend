@@ -39,8 +39,14 @@ async function bootstrap() {
     .map(s => s.trim())
     .filter(Boolean);
 
+  // Also allow the Railway deployment's own domain (frontend served from same host)
+  const railwayOrigin = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : null;
+
   const allowedOrigins = [
     process.env.FRONTEND_URL,
+    railwayOrigin,
     ...extraOrigins,
   ].filter((o): o is string => !!o);
 
