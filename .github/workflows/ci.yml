@@ -24,7 +24,7 @@ jobs:
           cache: 'npm'
 
       - name: Instalar dependencias
-        run: npm ci --prefer-offline
+        run: npm install --legacy-peer-deps
 
       - name: Lint
         run: npm run lint

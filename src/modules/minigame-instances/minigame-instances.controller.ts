@@ -19,19 +19,24 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { MinigameInstancesService } from './minigame-instances.service';
+import { AIService, GenerateGameDto } from './ai.service';
 import { CreateMinigameInstanceDto } from './dto/create-minigame-instance.dto';
 import { UpdateMinigameInstanceDto } from './dto/update-minigame-instance.dto';
 import { AssignMinigameInstanceDto } from './dto/assign-minigame-instance.dto';
 import { SubmitQuizDto } from './dto/submit-quiz.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
 @ApiTags('Minigame Instances')
 @ApiBearerAuth()
 @Controller('minigame-instances')
 export class MinigameInstancesController {
-  constructor(private readonly service: MinigameInstancesService) {}
+  constructor(
+    private readonly service: MinigameInstancesService,
+    private readonly gemini: AIService,
+  ) {}
 
   // ─── DOCENTE ────────────────────────────────────────────────────────────────
 
@@ -315,5 +320,29 @@ export class MinigameInstancesController {
     @Param('classroomId', ParseUUIDPipe) classroomId: string,
   ) {
     return this.service.findByClassroom(classroomId, user.profile_id);
+  }
+
+  // ── AI generation ──────────────────────────────────────────────────────────
+
+  @Post('generate-ai')
+  @Public()
+  @ApiOperation({ summary: 'Generar contenido de juego con IA' })
+  generateAI(@Body() dto: GenerateGameDto) {
+    return this.gemini.generateGame(dto);
+  }
+
+  @Post('generate-ai/save')
+  @Public()
+  @ApiOperation({ summary: 'Guardar juego generado por IA (sin auth)' })
+  async saveAIGame(@Body() body: { title: string; topic: string; content_json: any }) {
+    return this.gemini.saveGeneratedGame(body.title, body.topic, body.content_json);
+  }
+
+  @Delete(':id/force')
+  @Public()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Eliminar cualquier juego sin autenticación (solo para pruebas)' })
+  async forceDelete(@Param('id', ParseUUIDPipe) id: string) {
+    return this.gemini.deleteGame(id);
   }
 }
