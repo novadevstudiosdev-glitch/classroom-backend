@@ -127,6 +127,18 @@ export class MinigameInstancesService {
     await this.instanceRepo.softDelete(id);
   }
 
+  async forceDeleteOwn(id: string, userId: string, role: string): Promise<void> {
+    const instance = await this.instanceRepo.findOne({ where: { id } });
+    if (!instance) throw new NotFoundException('Minijuego no encontrado.');
+
+    if (role !== 'admin') {
+      const teacher_id = await this.getTeacherId(userId);
+      if (instance.teacher_id !== teacher_id) throw new ForbiddenException('No sos el dueño de este minijuego.');
+    }
+
+    await this.instanceRepo.delete(id);
+  }
+
   async assign(id: string, userId: string, dto: AssignMinigameInstanceDto): Promise<MinigameInstanceAssignment> {
     const teacher_id = await this.getTeacherId(userId);
     const instance = await this.instanceRepo.findOne({ where: { id } });

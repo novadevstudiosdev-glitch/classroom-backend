@@ -9,7 +9,9 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { InjectRepository } from '@nestjs/typeorm';
+import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
+import { randomBytes } from 'crypto';
 import { MinigameInstance } from '../minigame-instances/entities/minigame-instance.entity';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -48,7 +50,9 @@ interface Room {
   wsPlaced: { word: string; cells: WsCell[] }[];
   wsFoundWords: Map<string, WsFoundWord>;
   wsStartedAt: number;
-  // Preguntados 1v1
+  // Reconnect support: players who disconnected during active game
+  disconnectedPlayers: Map<string, { player: Player; disconnectedAt: number }>;
+  // Preguntados N-player
   pqPlayers: string[];
   pqTurn: string | null;
   pqScores: Map<string, { alias: string; score: number; correct: number }>;
@@ -82,9 +86,19 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     @InjectRepository(MinigameInstance)
     private readonly instanceRepo: Repository<MinigameInstance>,
+    private readonly jwtService: JwtService,
   ) {}
 
-  handleConnection(_client: Socket) {}
+  handleConnection(client: Socket) {
+    const token = client.handshake.auth?.token as string | undefined;
+    if (!token) { client.disconnect(); return; }
+    try {
+      const payload = this.jwtService.verify<any>(token);
+      client.data.user = payload; // { sub, email, role }
+    } catch {
+      client.disconnect();
+    }
+  }
 
   handleDisconnect(client: Socket) {
     // Remove from global lobby if was there
@@ -97,6 +111,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!roomCode) return;
     const room = this.rooms.get(roomCode);
     if (!room) return;
+
+    const player = room.players.get(client.id);
+
+    // During active game: save disconnected player for reconnect (60s grace period)
+    if (room.status === 'playing' && player) {
+      room.disconnectedPlayers.set(player.alias, { player: { ...player }, disconnectedAt: Date.now() });
+      setTimeout(() => { room.disconnectedPlayers.delete(player.alias); }, 60000);
+    }
 
     room.players.delete(client.id);
     this.socketRoom.delete(client.id);
@@ -167,10 +189,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { alias: string; roomName: string },
   ) {
-    const alias = data.alias?.trim();
-    const roomName = data.roomName?.trim();
+    const alias = (data.alias ?? '').trim().slice(0, 24);
+    const roomName = (data.roomName ?? '').trim().slice(0, 48);
     if (!alias || !roomName) {
       client.emit('error', { message: 'Falta el alias o el nombre de sala.' });
+      return;
+    }
+    if (this.rooms.size >= 100) {
+      client.emit('error', { message: 'El servidor está al límite de salas activas. Intentá más tarde.' });
       return;
     }
 
@@ -200,6 +226,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       wsPlaced: [],
       wsFoundWords: new Map(),
       wsStartedAt: 0,
+      disconnectedPlayers: new Map(),
       pqPlayers: [],
       pqTurn: null,
       pqScores: new Map(),
@@ -239,13 +266,43 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const room = this.rooms.get(roomCode);
-    if (!room)                     { client.emit('error', { message: 'Sala no encontrada. Verificá el código.' }); return; }
-    if (room.status === 'playing') { client.emit('error', { message: 'La partida ya empezó.' }); return; }
-    if (room.status === 'finished'){ client.emit('error', { message: 'Esta partida ya terminó.' }); return; }
+    if (!room)                      { client.emit('error', { message: 'Sala no encontrada. Verificá el código.' }); return; }
+    if (room.status === 'finished') { client.emit('error', { message: 'Esta partida ya terminó.' }); return; }
+
+    if (room.status === 'playing') {
+      // Allow reconnect if player was in the game and disconnected recently
+      const dc = room.disconnectedPlayers.get(alias);
+      if (dc && Date.now() - dc.disconnectedAt < 60000) {
+        const restoredPlayer = { ...dc.player, socketId: client.id };
+        room.disconnectedPlayers.delete(alias);
+        room.players.set(client.id, restoredPlayer);
+        this.socketRoom.set(client.id, roomCode);
+        // If the host reconnects, update their socketId
+        if (dc.player.socketId === room.hostSocketId) room.hostSocketId = client.id;
+        client.join(roomCode);
+        client.emit('reconnected', {
+          roomCode,
+          roomName: room.roomName,
+          alias,
+          isHost: room.hostSocketId === client.id,
+          gameType: room.gameType,
+          score: restoredPlayer.score,
+        });
+        this.emitRoomUpdate(roomCode, room);
+        return;
+      }
+      client.emit('error', { message: 'La partida ya empezó.' });
+      return;
+    }
 
     const taken = [...room.players.values()].map(p => p.alias.toLowerCase());
     if (taken.includes(alias.toLowerCase())) {
       client.emit('error', { message: 'Ese alias ya está en uso en esta sala.' });
+      return;
+    }
+
+    if (room.players.size >= 50) {
+      client.emit('error', { message: 'La sala está llena (máx. 50 jugadores).' });
       return;
     }
 
@@ -288,21 +345,30 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('get-quizzes')
   async handleGetQuizzes(@ConnectedSocket() client: Socket) {
-    const instances = await this.instanceRepo.find();
+    // Select only metadata columns — avoids loading full content_json
+    const instances = await this.instanceRepo.find({
+      select: { id: true, title: true, game_type: true, question_count: true, content_json: true },
+      where: { deleted_at: null as any },
+    });
     const quizzes = instances.map(i => {
-      const content = i.content_json as any;
-      const type: GameType = content?.type ?? 'quiz';
-      let questionCount = 0;
-      if (type === 'quiz') {
-        // Support both {type,questions:[...]} and legacy plain array
-        questionCount = Array.isArray(content?.questions) ? content.questions.length : (Array.isArray(content) ? content.length : 0);
-      } else if (type === 'preguntados') {
-        const cats = content?.categories ?? [];
-        questionCount = cats.reduce((sum: number, c: any) => sum + (c.questions?.length ?? 0), 0);
+      // Use pre-computed columns when available, fallback to parsing content_json for legacy rows
+      let type: GameType = (i.game_type as GameType) ?? 'quiz';
+      let questionCount = i.question_count ?? 0;
+      if (!i.game_type) {
+        const content = i.content_json as any;
+        type = content?.type ?? 'quiz';
+        if (type === 'quiz') {
+          questionCount = Array.isArray(content?.questions) ? content.questions.length : (Array.isArray(content) ? content.length : 0);
+        } else if (type === 'preguntados') {
+          const cats = content?.categories ?? [];
+          questionCount = cats.reduce((sum: number, c: any) => sum + (c.questions?.length ?? 0), 0);
+        } else if (type === 'wordsearch') {
+          questionCount = Array.isArray(content?.words) ? content.words.length : 0;
+        }
       }
       return {
         id: i.id,
-        title: (i as any).title ?? 'Sin título',
+        title: i.title ?? 'Sin título',
         type,
         questionCount,
       };
@@ -456,6 +522,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     room.wsPlaced = [];
     room.wsFoundWords = new Map();
     room.wsStartedAt = 0;
+    room.disconnectedPlayers = new Map();
     room.pqPlayers = [];
     room.pqTurn = null;
     room.pqScores = new Map();
@@ -547,14 +614,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         room.status = 'waiting';
         client.emit('error', { message: 'El juego no tiene categorías.' }); return;
       }
-      room.pqPlayers = playerIds.slice(0, 2);
+      const n = Math.min(playerIds.length, 10);
+      room.pqPlayers = playerIds.slice(0, n);
       room.pqTurn = room.pqPlayers[0];
       room.pqScores = new Map(room.pqPlayers.map(id => [id, {
         alias: room.players.get(id)!.alias, score: 0, correct: 0,
       }]));
       room.pqCategoryQIdx = new Array(cats.length).fill(0);
       room.pqRound = 0;
-      room.pqTotalRounds = room.gameData?.rounds ?? 6;
+      const baseRounds = room.gameData?.rounds ?? 6;
+      const roundsPerPlayer = Math.max(2, Math.ceil(baseRounds / n));
+      room.pqTotalRounds = roundsPerPlayer * n;
       room.pqAwaitingAnswer = false;
       room.pqCurrentQuestion = null;
       const pqPlayers = room.pqPlayers.map(id => ({
@@ -842,9 +912,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private generateRoomCode(): string {
+    // Cryptographically secure room code — 6 uppercase alphanumeric chars
+    const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous I/1/O/0
     let code: string;
     do {
-      code = Math.random().toString(36).substring(2, 8).toUpperCase();
+      code = Array.from(randomBytes(6))
+        .map(b => CHARS[b % CHARS.length])
+        .join('');
     } while (this.rooms.has(code));
     return code;
   }
@@ -990,7 +1064,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         placed.push({ word, cells });
         success = true;
       }
-      if (!placed.find(p => p.word === word)) placed.push({ word, cells: [] });
+      // Words that can't be placed are simply omitted — don't add empty placeholders
+      // that would appear in the word list but be impossible to find
     }
 
     // Fill empty cells with random letters

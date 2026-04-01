@@ -9,7 +9,9 @@ import {
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -326,23 +328,34 @@ export class MinigameInstancesController {
 
   @Post('generate-ai')
   @Public()
-  @ApiOperation({ summary: 'Generar contenido de juego con IA' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Generar contenido de juego con IA (lobby público)' })
   generateAI(@Body() dto: GenerateGameDto) {
+    // Input validation handled in AIService.generateGame()
     return this.gemini.generateGame(dto);
   }
 
   @Post('generate-ai/save')
   @Public()
-  @ApiOperation({ summary: 'Guardar juego generado por IA (sin auth)' })
+  @ApiOperation({ summary: 'Guardar juego generado por IA' })
   async saveAIGame(@Body() body: { title: string; topic: string; content_json: any }) {
+    if (!body?.content_json) throw new BadRequestException('content_json requerido.');
+    // Size / sanitization handled in AIService.saveGeneratedGame()
     return this.gemini.saveGeneratedGame(body.title, body.topic, body.content_json);
   }
 
   @Delete(':id/force')
-  @Public()
+  @Roles('teacher', 'admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Eliminar cualquier juego sin autenticación (solo para pruebas)' })
-  async forceDelete(@Param('id', ParseUUIDPipe) id: string) {
-    return this.gemini.deleteGame(id);
+  @ApiOperation({ summary: 'Eliminar juego permanentemente (solo dueño o admin)' })
+  @ApiResponse({ status: 204, description: 'Juego eliminado permanentemente.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  @ApiResponse({ status: 403, description: 'No sos el dueño de este juego.' })
+  @ApiResponse({ status: 404, description: 'Juego no encontrado.' })
+  async forceDelete(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.forceDeleteOwn(id, user.sub, user.role);
   }
 }
