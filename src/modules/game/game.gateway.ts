@@ -7,7 +7,7 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { Server, Socket, Namespace } from 'socket.io';
+import { Socket, Namespace } from 'socket.io';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
@@ -26,7 +26,6 @@ import {
   handleAction as trucoHandleAction,
   buildPlayerView,
   timeoutShowEnvido,
-  getTeam as trucoGetTeam,
   TableTheme,
 } from './truco.engine';
 

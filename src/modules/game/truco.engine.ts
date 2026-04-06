@@ -442,7 +442,7 @@ function handlePlayCard(state: TrucoGameState, socketId: string, cardIndex: numb
     if (state.trucoStatus === 'resolved' || state.round > 0) newEnvidoStatus = 'expired';
   }
 
-  let newState: TrucoGameState = {
+  const newState: TrucoGameState = {
     ...state,
     hands: { ...state.hands, [socketId]: newHand },
     playedInRound: newPlayedInRound,
@@ -934,8 +934,7 @@ function handleRespondTruco(
 
   if (response === 'noquiero') {
     const winnerTeam = state.trucoCallerTeam!;
-    const pts = Math.max(1, state.trucoPtsIfWon - 1);
-    // Hand ends immediately
+    // Hand ends immediately (points calculated by finalizeHand based on trucoPtsIfWon)
     return finalizeHand(
       { ...state, trucoStatus: 'resolved', trucoAccepted: false },
       winnerTeam,
@@ -1020,7 +1019,6 @@ function handleRespondFlor(
       if (hasFlor(state.originalHands[sid] ?? []))
         respBest = Math.max(respBest, florValue(state.originalHands[sid] ?? []));
     }
-    const manoTeam = getTeamSafe(state, state.manoSocketId) ?? 'A';
     const winnerTeam: 'A' | 'B' = callerFV >= respBest ? callerTeam : team; // tie → caller wins (mano)
     return {
       newState: {
