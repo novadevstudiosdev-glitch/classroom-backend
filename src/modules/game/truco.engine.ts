@@ -1151,6 +1151,7 @@ export interface TrucoPlayerView {
   florStatus: TrucoGameState['florStatus'];
   florMustDeclare: boolean; // if this player must declare
   florDeclaredAliases: string[];
+  florResponderTeam: 'A' | 'B' | null; // which team must respond when florStatus=pending
   // Truco
   trucoStatus: TrucoGameState['trucoStatus'];
   trucoChain: TrucoCallEntry[];
@@ -1223,6 +1224,7 @@ export function buildPlayerView(state: TrucoGameState, socketId: string): TrucoP
     florStatus: state.florStatus,
     florMustDeclare: state.florMustDeclare.includes(socketId) && !state.florDeclaredBy.includes(socketId),
     florDeclaredAliases,
+    florResponderTeam: state.florResponderTeam,
     trucoStatus: state.trucoStatus,
     trucoChain: state.trucoChain,
     trucoResponderTeam: state.trucoResponderTeam,
