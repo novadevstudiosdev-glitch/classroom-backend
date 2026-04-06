@@ -82,6 +82,7 @@ export class MinigameInstancesService {
     return this.instanceRepo.find({
       where: { teacher_id },
       order: { updated_at: 'DESC' },
+      take: 100,
     });
   }
 
@@ -89,6 +90,7 @@ export class MinigameInstancesService {
     return this.instanceRepo.find({
       where: { is_public: true },
       order: { updated_at: 'DESC' },
+      take: 100,
     });
   }
 

@@ -7,16 +7,99 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
+import { Server, Socket, Namespace } from 'socket.io';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { MinigameInstance } from '../minigame-instances/entities/minigame-instance.entity';
+import { User } from '../users/entities/user.entity';
+import { TeacherProfile } from '../teachers/entities/teacher-profile.entity';
+import { StudentProfile } from '../students/entities/student-profile.entity';
+import { ParentProfile } from '../parents/entities/parent-profile.entity';
+import {
+  TrucoConfig,
+  TrucoGameState,
+  TrucoAction,
+  TrucoCard,
+  initTrucoGame,
+  handleAction as trucoHandleAction,
+  buildPlayerView,
+  timeoutShowEnvido,
+  getTeam as trucoGetTeam,
+  TableTheme,
+} from './truco.engine';
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Translate "friendly" frontend actions → engine TrucoAction
+//  The frontend sends short keys like { type:'envido' } while the engine
+//  uses { type:'call-envido', callType:'envido' }.  Context (state) is
+//  needed to disambiguate quiero/no-quiero between envido and truco.
+// ─────────────────────────────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function translateTrucoAction(state: TrucoGameState, socketId: string, raw: any): TrucoAction {
+  const { type, ...rest } = raw as Record<string, unknown>;
+
+  switch (type) {
+
+    /* ── Play card ── */
+    case 'play-card': {
+      const card = rest.card as TrucoCard | undefined;
+      if (!card) return { type: 'play-card', cardIndex: -1 };
+      const hand = state.hands[socketId] ?? [];
+      const idx = hand.findIndex(c => c.suit === card.suit && c.value === card.value);
+      return { type: 'play-card', cardIndex: idx };
+    }
+
+    /* ── Envido calls ── */
+    case 'envido':       return { type: 'call-envido', callType: 'envido' };
+    case 'real-envido':  return { type: 'call-envido', callType: 'realenvido' };
+    case 'falta-envido': return { type: 'call-envido', callType: 'faltaenvido' };
+
+    /* ── Truco calls ── */
+    case 'truco':      return { type: 'call-truco', callType: 'truco' };
+    case 'retruco':
+      // As a response to a pending truco → respond-truco; otherwise escalate call
+      if (state.trucoStatus === 'pending') return { type: 'respond-truco', response: 'retruco' };
+      return { type: 'call-truco', callType: 'retruco' };
+    case 'vale-cuatro':
+      if (state.trucoStatus === 'pending') return { type: 'respond-truco', response: 'valecuatro' };
+      return { type: 'call-truco', callType: 'valecuatro' };
+
+    /* ── Quiero / No Quiero (context-sensitive) ── */
+    case 'quiero':
+      if (state.florStatus === 'pending')   return { type: 'respond-flor',   response: 'conquiero' };
+      if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'quiero' };
+      if (state.trucoStatus === 'pending')  return { type: 'respond-truco',  response: 'quiero' };
+      return { type: 'respond-envido', response: 'quiero' }; // fallback
+    case 'no-quiero':
+      if (state.florStatus === 'pending')   return { type: 'respond-flor',   response: 'congangamos' };
+      if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'noquiero' };
+      if (state.trucoStatus === 'pending')  return { type: 'respond-truco',  response: 'noquiero' };
+      return { type: 'respond-envido', response: 'noquiero' }; // fallback
+
+    /* ── Flor ── */
+    case 'flor':              return { type: 'declare-flor' };
+    case 'con-flor-me-gano':  return { type: 'respond-flor', response: 'congangamos' };
+    case 'contraflor':        return { type: 'respond-flor', response: 'contraflor' };
+    case 'contraflor-al-resto': return { type: 'respond-flor', response: 'contrafloralresto' };
+
+    /* ── Show / hide envido cards ── */
+    case 'show-envido': return (rest.show === true) ? { type: 'show-envido' } : { type: 'hide-envido' };
+    case 'hide-envido': return { type: 'hide-envido' };
+
+    /* ── Pass-through ── */
+    case 'ir-al-mazo':    return { type: 'ir-al-mazo' };
+    case 'change-theme':  return { type: 'change-theme', theme: rest.theme as TableTheme };
+    case 'next-hand':     return { type: 'next-hand' };
+
+    default: return raw as TrucoAction;
+  }
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type GameType = 'quiz' | 'wordsearch' | 'anagram' | 'preguntados';
+type GameType = 'quiz' | 'wordsearch' | 'anagram' | 'preguntados' | 'truco';
 
 interface Player {
   socketId: string;
@@ -32,6 +115,8 @@ interface WsFoundWord { alias: string; cells: WsCell[]; colorIndex: number; }
 interface Room {
   roomCode: string;
   roomName: string;
+  maxPlayers: number;
+  password: string | null;
   hostSocketId: string;
   players: Map<string, Player>;
   selectedInstanceId: string | null;
@@ -62,6 +147,11 @@ interface Room {
   pqAwaitingAnswer: boolean;
   pqCurrentQuestion: any;
   pqQuestionTimer: ReturnType<typeof setTimeout> | null;
+  // Truco
+  trucoConfig: TrucoConfig | null;
+  trucoState: TrucoGameState | null;
+  trucoShowEnvidoTimer: ReturnType<typeof setTimeout> | null;
+  trucoNextHandTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface LobbyUser {
@@ -77,7 +167,7 @@ interface LobbyUser {
 })
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server: Namespace;
 
   private rooms = new Map<string, Room>();
   private socketRoom = new Map<string, string>();
@@ -86,6 +176,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     @InjectRepository(MinigameInstance)
     private readonly instanceRepo: Repository<MinigameInstance>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
+    @InjectRepository(TeacherProfile)
+    private readonly teacherRepo: Repository<TeacherProfile>,
+    @InjectRepository(StudentProfile)
+    private readonly studentRepo: Repository<StudentProfile>,
+    @InjectRepository(ParentProfile)
+    private readonly parentRepo: Repository<ParentProfile>,
     private readonly jwtService: JwtService,
   ) {}
 
@@ -147,14 +245,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Payload: { alias: string }
 
   @SubscribeMessage('join-lobby')
-  handleJoinLobby(
+  async handleJoinLobby(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { alias: string },
   ) {
-    const alias = (data.alias ?? '').trim().slice(0, 24) || 'Anónimo';
+    let alias = await this.resolveAlias(client, data.alias);
+    // Auto-suffix if another active lobby user already holds this alias
+    const takenLobby = new Set([...this.lobbyUsers.values()].map(u => u.alias.toLowerCase()));
+    let suffix = 2;
+    const baseAlias = alias;
+    while (takenLobby.has(alias.toLowerCase())) {
+      alias = `${baseAlias}#${suffix++}`;
+    }
     this.lobbyUsers.set(client.id, { socketId: client.id, alias });
     client.join('global-lobby');
 
+    client.emit('lobby-joined', { alias });
     client.emit('rooms-list', { rooms: this.getPublicRooms() });
     this.emitLobbyUpdate();
   }
@@ -185,12 +291,31 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Payload: { alias: string; roomName: string }
 
   @SubscribeMessage('create-room')
-  handleCreateRoom(
+  async handleCreateRoom(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { alias: string; roomName: string },
+    @MessageBody() data: {
+      alias?: string;
+      roomName: string;
+      maxPlayers?: number;
+      password?: string;
+      trucoConfig?: TrucoConfig;
+    },
   ) {
-    const alias = (data.alias ?? '').trim().slice(0, 24);
+    const alias = await this.resolveAlias(client, data.alias);
     const roomName = (data.roomName ?? '').trim().slice(0, 48);
+    const isTruco = !!data.trucoConfig;
+
+    // For truco, derive maxPlayers from mode
+    let maxPlayers: number;
+    if (isTruco) {
+      const modePlayerCount: Record<string, number> = { '1v1': 2, '2v2': 4, '3v3': 6 };
+      maxPlayers = modePlayerCount[data.trucoConfig!.mode] ?? 2;
+    } else {
+      const maxPlayersRaw = typeof data.maxPlayers === 'number' ? data.maxPlayers : Number(data.maxPlayers);
+      maxPlayers = Number.isFinite(maxPlayersRaw) ? Math.max(2, Math.min(50, Math.floor(maxPlayersRaw))) : 50;
+    }
+
+    const password = String(data.password ?? '').trim().slice(0, 32);
     if (!alias || !roomName) {
       client.emit('error', { message: 'Falta el alias o el nombre de sala.' });
       return;
@@ -205,15 +330,32 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.leave('global-lobby');
     this.emitLobbyUpdate();
 
+    // Validate truco config
+    let trucoConfig: TrucoConfig | null = null;
+    if (isTruco) {
+      const tc = data.trucoConfig!;
+      trucoConfig = {
+        mode: ['1v1', '2v2', '3v3'].includes(tc.mode) ? tc.mode : '1v1',
+        maxPoints: tc.maxPoints === 30 ? 30 : 15,
+        florEnabled: !!tc.florEnabled,
+        contraFlorEnabled: !!tc.contraFlorEnabled && !!tc.florEnabled,
+        tableTheme: (['green', 'wood', 'plastic', 'night'] as TableTheme[]).includes(tc.tableTheme)
+          ? tc.tableTheme
+          : 'green',
+      };
+    }
+
     const roomCode = this.generateRoomCode();
     const room: Room = {
       roomCode,
       roomName,
+      maxPlayers,
+      password: password ? password : null,
       hostSocketId: client.id,
       players: new Map(),
-      selectedInstanceId: null,
-      selectedTitle: '',
-      gameType: 'quiz',
+      selectedInstanceId: isTruco ? 'truco' : null,
+      selectedTitle: isTruco ? `Truco ${trucoConfig!.mode}` : '',
+      gameType: isTruco ? 'truco' : 'quiz',
       gameData: null,
       questions: [],
       currentQ: 0,
@@ -236,6 +378,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       pqAwaitingAnswer: false,
       pqCurrentQuestion: null,
       pqQuestionTimer: null,
+      trucoConfig,
+      trucoState: null,
+      trucoShowEnvidoTimer: null,
+      trucoNextHandTimer: null,
     };
     this.rooms.set(roomCode, room);
 
@@ -244,7 +390,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.socketRoom.set(client.id, roomCode);
     client.join(roomCode);
 
-    client.emit('room-created', { roomCode, roomName, alias, isHost: true });
+    client.emit('room-created', { roomCode, roomName, alias, isHost: true, trucoConfig: trucoConfig ?? null });
     this.emitRoomUpdate(roomCode, room);
     this.emitRoomsUpdate();
   }
@@ -253,12 +399,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Payload: { roomCode: string; alias: string }
 
   @SubscribeMessage('join-room')
-  handleJoinRoom(
+  async handleJoinRoom(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomCode: string; alias: string },
+    @MessageBody() data: { roomCode: string; alias?: string; password?: string },
   ) {
-    const alias = data.alias?.trim();
+    let alias = await this.resolveAlias(client, data.alias);
     const roomCode = (data.roomCode ?? '').trim().toUpperCase();
+    const password = String(data.password ?? '').trim();
 
     if (!roomCode || !alias) {
       client.emit('error', { message: 'Falta el código o el alias.' });
@@ -295,14 +442,34 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const taken = [...room.players.values()].map(p => p.alias.toLowerCase());
-    if (taken.includes(alias.toLowerCase())) {
-      client.emit('error', { message: 'Ese alias ya está en uso en esta sala.' });
+    // Resolve alias conflicts: clean up stale sockets, auto-suffix active ones (#2, #3…)
+    const takenAliases = () => new Set([...room.players.values()].map(p => p.alias.toLowerCase()));
+    let resolvedAlias = alias;
+    const conflictEntry = [...room.players.entries()].find(([, p]) => p.alias.toLowerCase() === alias.toLowerCase());
+    if (conflictEntry) {
+      const [conflictSocketId] = conflictEntry;
+      const conflictSocket = this.server.sockets.get(conflictSocketId);
+      if (conflictSocket?.connected) {
+        // Active player with same name — auto-assign a numeric suffix (#2, #3…)
+        let suffix = 2;
+        while (takenAliases().has(`${alias}#${suffix}`.toLowerCase())) suffix++;
+        resolvedAlias = `${alias}#${suffix}`;
+      } else {
+        // Stale disconnected entry — clean up and reuse the alias
+        room.players.delete(conflictSocketId);
+        this.socketRoom.delete(conflictSocketId);
+        if (room.hostSocketId === conflictSocketId) room.hostSocketId = client.id;
+      }
+    }
+    alias = resolvedAlias;
+
+    if (room.password && room.password !== password) {
+      client.emit('error', { message: 'Contraseña incorrecta.' });
       return;
     }
 
-    if (room.players.size >= 50) {
-      client.emit('error', { message: 'La sala está llena (máx. 50 jugadores).' });
+    if (room.players.size >= room.maxPlayers) {
+      client.emit('error', { message: `La sala está llena (máx. ${room.maxPlayers} jugadores).` });
       return;
     }
 
@@ -322,14 +489,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.socketRoom.set(client.id, roomCode);
     client.join(roomCode);
 
+    // If the original host socket is no longer in the room (e.g. page navigation
+    // disconnected the old socket), transfer host to whoever is joining now.
+    if (!room.players.has(room.hostSocketId)) {
+      room.hostSocketId = client.id;
+    }
+    const isHost = room.hostSocketId === client.id;
+
     client.emit('joined', {
       roomCode,
       roomName: room.roomName,
       alias,
-      isHost: false,
+      isHost,
       selectedInstanceId: room.selectedInstanceId,
       selectedTitle: room.selectedTitle,
       gameType: room.gameType,
+      trucoConfig: room.trucoConfig ?? null,
     });
 
     this.server.to(roomCode).emit('chat', {
@@ -639,7 +814,123 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         players: pqPlayers,
         turnAlias: room.players.get(room.pqTurn)?.alias,
       });
+    } else if (room.gameType === 'truco') {
+      if (!room.trucoConfig) {
+        room.status = 'waiting';
+        client.emit('error', { message: 'Configuración de Truco faltante.' }); return;
+      }
+      const modeCount: Record<string, number> = { '1v1': 2, '2v2': 4, '3v3': 6 };
+      const required = modeCount[room.trucoConfig.mode] ?? 2;
+      if (room.players.size !== required) {
+        room.status = 'waiting';
+        client.emit('error', {
+          message: `Se necesitan exactamente ${required} jugadores para el modo ${room.trucoConfig.mode}.`
+        }); return;
+      }
+      // Initialize truco game
+      const seatOrder = [...room.players.keys()];
+      const aliases: Record<string, string> = {};
+      for (const [sid, p] of room.players.entries()) aliases[sid] = p.alias;
+      room.trucoState = initTrucoGame(seatOrder, aliases, room.trucoConfig);
+      // Emit game-started to everyone (generic)
+      this.server.to(roomCode).emit('game-started', { gameType: 'truco' });
+      // Send personalized state to each player
+      setTimeout(() => this.emitTrucoState(roomCode, room), 300);
     }
+  }
+
+  // ── Truco: broadcast per-player state ─────────────────────────────────────
+
+  private emitTrucoState(roomCode: string, room: Room) {
+    if (!room.trucoState) return;
+    for (const [socketId] of room.players.entries()) {
+      const view = buildPlayerView(room.trucoState, socketId);
+      this.server.to(socketId).emit('truco-state', view);
+    }
+  }
+
+  // ── truco-action ─────────────────────────────────────────────────────────
+  // Payload: TrucoAction
+
+  @SubscribeMessage('truco-action')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handleTrucoAction(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() rawData: any,
+  ) {
+    const roomCode = this.socketRoom.get(client.id);
+    if (!roomCode) return;
+    const room = this.rooms.get(roomCode);
+    if (!room || room.gameType !== 'truco' || !room.trucoState) {
+      client.emit('error', { message: 'No hay partida de Truco activa.' }); return;
+    }
+
+    // Translate frontend-friendly action names → engine action format
+    const data: TrucoAction = translateTrucoAction(room.trucoState, client.id, rawData);
+
+    // Theme change: host only
+    if (data.type === 'change-theme') {
+      if (room.hostSocketId !== client.id) {
+        client.emit('error', { message: 'Solo el anfitrión puede cambiar el tapete.' }); return;
+      }
+      const res = trucoHandleAction(room.trucoState, client.id, data);
+      if (res.error) { client.emit('error', { message: res.error }); return; }
+      room.trucoState = res.newState;
+      this.emitTrucoState(roomCode, room);
+      return;
+    }
+
+    const result = trucoHandleAction(room.trucoState, client.id, data);
+    if (result.error) {
+      client.emit('error', { message: result.error }); return;
+    }
+    room.trucoState = result.newState;
+
+    // Handle phase transitions
+    const phase = room.trucoState.phase;
+
+    if (phase === 'show_envido') {
+      // Broadcast updated state
+      this.emitTrucoState(roomCode, room);
+      // Start 30s timer for auto-hide
+      if (room.trucoShowEnvidoTimer) clearTimeout(room.trucoShowEnvidoTimer);
+      room.trucoShowEnvidoTimer = setTimeout(() => {
+        if (room.trucoState?.phase === 'show_envido') {
+          room.trucoState = timeoutShowEnvido(room.trucoState);
+          this.emitTrucoState(roomCode, room);
+          this.scheduleTrucoNextHand(roomCode, room);
+        }
+      }, 30000);
+    } else if (phase === 'hand_end') {
+      this.emitTrucoState(roomCode, room);
+      // Auto-deal next hand after 5 seconds
+      this.scheduleTrucoNextHand(roomCode, room);
+    } else if (phase === 'game_over') {
+      room.status = 'finished';
+      this.emitTrucoState(roomCode, room);
+    } else {
+      this.emitTrucoState(roomCode, room);
+    }
+
+    // If show_envido phase resolved → schedule next hand
+    if (data.type === 'show-envido' || data.type === 'hide-envido') {
+      if (phase === 'hand_end' || phase === 'game_over') {
+        if (room.trucoShowEnvidoTimer) { clearTimeout(room.trucoShowEnvidoTimer); room.trucoShowEnvidoTimer = null; }
+        if (phase === 'hand_end') this.scheduleTrucoNextHand(roomCode, room);
+      }
+    }
+  }
+
+  private scheduleTrucoNextHand(roomCode: string, room: Room) {
+    if (room.trucoNextHandTimer) clearTimeout(room.trucoNextHandTimer);
+    room.trucoNextHandTimer = setTimeout(() => {
+      if (!room.trucoState || room.trucoState.phase !== 'hand_end') return;
+      const res = trucoHandleAction(room.trucoState, room.trucoState.seatOrder[0], { type: 'next-hand' });
+      if (!res.error) {
+        room.trucoState = res.newState;
+        this.emitTrucoState(roomCode, room);
+      }
+    }, 5000);
   }
 
   // ── game-complete (wordsearch / anagram) ──────────────────────────────────
@@ -813,7 +1104,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const target = [...room.players.values()].find(p => p.alias === data.alias && p.socketId !== client.id);
     if (!target) return;
 
-    const targetSocket = this.server.sockets.sockets.get(target.socketId);
+    const targetSocket = this.server.sockets.get(target.socketId);
     if (targetSocket) {
       targetSocket.emit('kicked', { message: 'Fuiste expulsado de la sala.' });
       targetSocket.leave(roomCode);
@@ -899,6 +1190,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         roomName: r.roomName,
         playerCount: r.players.size,
         hostAlias: r.players.get(r.hostSocketId)?.alias ?? '—',
+        maxPlayers: r.maxPlayers,
+        locked: !!r.password,
+        gameType: r.gameType,
+        trucoConfig: r.trucoConfig ?? null,
       }));
   }
 
@@ -907,8 +1202,45 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private emitLobbyUpdate() {
-    const users = [...this.lobbyUsers.values()].map(u => ({ alias: u.alias }));
+    const users = [...this.lobbyUsers.values()].map(u => ({ socketId: u.socketId, alias: u.alias }));
     this.server.to('global-lobby').emit('lobby-update', { users });
+  }
+
+  private async resolveAlias(client: Socket, fallback?: string) {
+    const fallbackAlias = (fallback ?? '').trim().slice(0, 48);
+    const payload = client.data?.user as { sub?: string; role?: string; email?: string } | undefined;
+    const userId = payload?.sub ?? '';
+    const role = payload?.role ?? '';
+
+    if (!userId || !role) return fallbackAlias || 'Anónimo';
+
+    try {
+      if (role === 'teacher') {
+        const p = await this.teacherRepo.findOne({ where: { user_id: userId } });
+        const name = `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.trim();
+        if (name) return name.slice(0, 48);
+      }
+
+      if (role === 'parent') {
+        const p = await this.parentRepo.findOne({ where: { user_id: userId } });
+        const name = `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.trim();
+        if (name) return name.slice(0, 48);
+      }
+
+      if (role === 'student') {
+        const p = await this.studentRepo.findOne({ where: { user_id: userId } });
+        const name = (p?.alias ?? '').trim();
+        if (name) return name.slice(0, 48);
+      }
+
+      const u = await this.userRepo.findOne({ where: { id: userId } });
+      const email = (u?.email ?? payload?.email ?? '').trim();
+      if (email) return email.slice(0, 48);
+    } catch {
+      // ignore
+    }
+
+    return fallbackAlias || 'Anónimo';
   }
 
   private generateRoomCode(): string {

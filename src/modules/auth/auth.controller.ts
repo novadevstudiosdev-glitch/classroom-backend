@@ -214,4 +214,18 @@ export class AuthController {
   async me(@CurrentUser() user: any) {
     return { data: user };
   }
+
+  // ─────────────────────────────────────────────────
+  // PROFILE (usado por el frontend para inicializar sesión)
+  // ─────────────────────────────────────────────────
+
+  @Get('profile')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Perfil completo del usuario autenticado', description: 'Retorna id, email, role, profile_id y name (first_name + last_name) en una sola llamada, sin importar el rol.' })
+  @ApiResponse({ status: 200, description: 'Perfil del usuario.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  async profile(@CurrentUser() user: any) {
+    return this.authService.getMyProfile(user.sub, user.role);
+  }
 }

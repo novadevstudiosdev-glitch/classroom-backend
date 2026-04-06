@@ -3,10 +3,12 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 import { SessionEvent } from '../interfaces/session-event.interface';
 
 @Entity('sessions')
+@Index(['student_id'])
 export class Session {
   @PrimaryGeneratedColumn('uuid')
   id: string;

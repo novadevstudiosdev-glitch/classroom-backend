@@ -329,28 +329,78 @@ export class MinigameInstancesController {
   @Post('generate-ai')
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @ApiOperation({ summary: 'Generar contenido de juego con IA (lobby público)' })
+  @ApiOperation({
+    summary: 'Generar preguntas de quiz con IA (público, lobby)',
+    description: 'No requiere autenticación. Límite: 5 requests por minuto por IP. Usa Gemini para generar preguntas según el tema, cantidad y dificultad indicados.',
+  })
+  @ApiBody({
+    description: 'Parámetros para la generación con IA',
+    schema: {
+      type: 'object',
+      required: ['topic', 'questionCount', 'gameType'],
+      properties: {
+        topic: { type: 'string', example: 'Segunda Guerra Mundial' },
+        questionCount: { type: 'number', example: 10 },
+        gameType: { type: 'string', enum: ['quiz', 'wordsearch', 'anagram'], example: 'quiz' },
+        difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'], example: 'medium' },
+        language: { type: 'string', example: 'es' },
+      },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Preguntas generadas. Retorna array de preguntas con opciones y respuesta correcta.' })
+  @ApiResponse({ status: 400, description: 'Parámetros inválidos (topic vacío, cantidad fuera de rango, etc.).' })
+  @ApiResponse({ status: 429, description: 'Límite de rate excedido — 5 requests/min.' })
+  @ApiResponse({ status: 500, description: 'Error del proveedor de IA (Gemini no disponible).' })
   generateAI(@Body() dto: GenerateGameDto) {
-    // Input validation handled in AIService.generateGame()
     return this.gemini.generateGame(dto);
   }
 
   @Post('generate-ai/save')
   @Public()
-  @ApiOperation({ summary: 'Guardar juego generado por IA' })
+  @ApiOperation({
+    summary: 'Guardar juego generado por IA (público, lobby)',
+    description: 'Persiste el juego generado por IA como instancia de minijuego. No requiere autenticación — el juego queda asociado a un teacher_id genérico del lobby.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['title', 'content_json'],
+      properties: {
+        title: { type: 'string', example: 'Capitales de Europa' },
+        topic: { type: 'string', example: 'geografía europea' },
+        content_json: {
+          type: 'array',
+          description: 'Array de preguntas con opciones generadas por IA',
+          items: {
+            type: 'object',
+            properties: {
+              question: { type: 'string' },
+              correct: { type: 'string' },
+              options: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Juego guardado. Retorna la instancia creada con su id.' })
+  @ApiResponse({ status: 400, description: 'content_json faltante o title vacío.' })
   async saveAIGame(@Body() body: { title: string; topic: string; content_json: any }) {
     if (!body?.content_json) throw new BadRequestException('content_json requerido.');
-    // Size / sanitization handled in AIService.saveGeneratedGame()
     return this.gemini.saveGeneratedGame(body.title, body.topic, body.content_json);
   }
 
   @Delete(':id/force')
   @Roles('teacher', 'admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Eliminar juego permanentemente (solo dueño o admin)' })
-  @ApiResponse({ status: 204, description: 'Juego eliminado permanentemente.' })
+  @ApiOperation({
+    summary: 'Eliminar juego permanentemente (hard delete)',
+    description: 'Solo el docente dueño o un admin pueden usar este endpoint. A diferencia del DELETE /:id (soft delete), este elimina el registro definitivamente.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID de la instancia de minijuego' })
+  @ApiResponse({ status: 204, description: 'Juego eliminado permanentemente (sin body).' })
   @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
-  @ApiResponse({ status: 403, description: 'No sos el dueño de este juego.' })
+  @ApiResponse({ status: 403, description: 'No sos el dueño de este juego (solo admin puede saltear esta restricción).' })
   @ApiResponse({ status: 404, description: 'Juego no encontrado.' })
   async forceDelete(
     @CurrentUser() user: JwtPayload,
