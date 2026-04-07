@@ -50,10 +50,17 @@ function translateTrucoAction(state: TrucoGameState, socketId: string, raw: any)
       return { type: 'play-card', cardIndex: idx };
     }
 
-    /* ── Envido calls ── */
-    case 'envido':       return { type: 'call-envido', callType: 'envido' };
-    case 'real-envido':  return { type: 'call-envido', callType: 'realenvido' };
-    case 'falta-envido': return { type: 'call-envido', callType: 'faltaenvido' };
+    /* ── Envido calls (context-sensitive: raise vs new call) ── */
+    case 'envido':
+      // Re-envido raise while pending → respond-envido
+      if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'envido' };
+      return { type: 'call-envido', callType: 'envido' };
+    case 'real-envido':
+      if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'realenvido' };
+      return { type: 'call-envido', callType: 'realenvido' };
+    case 'falta-envido':
+      if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'faltaenvido' };
+      return { type: 'call-envido', callType: 'faltaenvido' };
 
     /* ── Truco calls ── */
     case 'truco':      return { type: 'call-truco', callType: 'truco' };
@@ -707,6 +714,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     room.pqCurrentQuestion = null;
     if (room.pqQuestionTimer) clearTimeout(room.pqQuestionTimer);
     room.pqQuestionTimer = null;
+    // Truco state reset
+    if (room.trucoShowEnvidoTimer) clearTimeout(room.trucoShowEnvidoTimer);
+    if (room.trucoNextHandTimer) clearTimeout(room.trucoNextHandTimer);
+    room.trucoShowEnvidoTimer = null;
+    room.trucoNextHandTimer = null;
+    room.trucoConfig = null;
+    room.trucoState = null;
 
     for (const p of room.players.values()) {
       p.score = 0;

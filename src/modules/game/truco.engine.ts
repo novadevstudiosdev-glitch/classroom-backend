@@ -47,7 +47,10 @@ export interface TrucoCallEntry {
 export interface EnvidoResult {
   winnerTeam: 'A' | 'B';
   pts: number;
-  reveals: { socketId: string; alias: string; value: number }[];
+  /** Alias of the player with the best envido (winner representative) */
+  winnerAlias?: string;
+  // Optional detailed reveals – frontend can attach cards for UI
+  reveals: { socketId: string; alias: string; value: number; cards?: TrucoCard[] }[];
   // pendingShow: socketIds who must show/hide their envido cards
   pendingShow: string[];
 }
@@ -96,6 +99,7 @@ export interface TrucoGameState {
   envidoCallerTeam: 'A' | 'B' | null;
   envidoResponderTeam: 'A' | 'B' | null;
   envidoResult: EnvidoResult | null;
+  envidoLastResponse: { alias: string; response: 'quiero' | 'noquiero' | EnvidoCallType } | null;
   // After quiero: winner team must show cards in pendingShowEnvido window
   pendingShowEnvido: string[]; // socketIds who must show/hide
 
@@ -113,6 +117,7 @@ export interface TrucoGameState {
   trucoResponderTeam: 'A' | 'B' | null;
   trucoPtsIfWon: number; // current stakes (if 'quiero' is accepted)
   trucoAccepted: boolean; // whether truco was accepted (quiero)
+  trucoLastResponse: { alias: string; response: 'quiero' | 'noquiero' | TrucoCallType } | null;
 
   // Me voy al mazo
   mazoTeam: 'A' | 'B' | null;
@@ -284,6 +289,7 @@ export function initTrucoGame(
     envidoCallerTeam: null,
     envidoResponderTeam: null,
     envidoResult: null,
+    envidoLastResponse: null,
     pendingShowEnvido: [],
     florMustDeclare: [],
     florDeclaredBy: [],
@@ -296,6 +302,7 @@ export function initTrucoGame(
     trucoResponderTeam: null,
     trucoPtsIfWon: 2,
     trucoAccepted: false,
+    trucoLastResponse: null,
     mazoTeam: null,
     phase: 'playing',
     handEndResult: null,
@@ -349,6 +356,7 @@ export function dealHand(state: TrucoGameState): TrucoGameState {
     envidoCallerTeam: null,
     envidoResponderTeam: null,
     envidoResult: null,
+    envidoLastResponse: null,
     pendingShowEnvido: [],
     florMustDeclare,
     florDeclaredBy: [],
@@ -361,6 +369,7 @@ export function dealHand(state: TrucoGameState): TrucoGameState {
     trucoResponderTeam: null,
     trucoPtsIfWon: 2,
     trucoAccepted: false,
+    trucoLastResponse: null,
     mazoTeam: null,
     manoSocketId,
     currentTurnSocketId: manoSocketId,
@@ -687,6 +696,16 @@ function handleShowEnvido(state: TrucoGameState, socketId: string, show: boolean
         },
       };
     }
+    if (newEnvidoResult) {
+      newEnvidoResult = {
+        ...newEnvidoResult,
+        reveals: (newEnvidoResult.reveals ?? []).map((r) =>
+          r.socketId === socketId
+            ? { ...r, cards: state.originalHands[socketId] ?? [] }
+            : r,
+        ),
+      };
+    }
   }
 
   const newState: TrucoGameState = {
@@ -753,6 +772,13 @@ function handleCallEnvido(
   socketId: string,
   callType: EnvidoCallType,
 ): ActionResult {
+  if (state.phase !== 'playing')
+    return { newState: state, error: 'No se puede cantar envido en este momento.' };
+  // Envido solo es válido en la primera ronda de la mano
+  if (state.round > 0)
+    return { newState: state, error: 'Solo se puede cantar envido en la primera ronda.' };
+  if (state.florStatus === 'pending')
+    return { newState: state, error: 'Hay una flor pendiente de respuesta.' };
   const team = getTeamSafe(state, socketId);
   if (!team) return { newState: state, error: 'No sos parte de la partida.' };
   if (state.envidoStatus !== 'available')
@@ -815,6 +841,7 @@ function handleRespondEnvido(
       newState: {
         ...state,
         envidoStatus: 'resolved',
+        envidoLastResponse: { alias: state.aliases[socketId] ?? '', response },
         envidoResult: { winnerTeam, pts, reveals: [], pendingShow: [] },
       },
     };
@@ -846,6 +873,17 @@ function handleRespondEnvido(
       pts = Math.max(1, envidoChainQuieroValue(state.envidoChain));
     }
 
+    // Representative winner alias (highest envido within winner team, breaking ties by mano)
+    let winnerAlias = '';
+    let bestVal = -1;
+    for (const sid of teamPlayers(state, winnerTeam)) {
+      const v = calculateEnvido(state.originalHands[sid] ?? []);
+      if (v > bestVal) {
+        bestVal = v;
+        winnerAlias = state.aliases[sid] ?? sid;
+      }
+    }
+
     // Winner team's players must show their envido cards
     const pendingShow = teamPlayers(state, winnerTeam);
 
@@ -853,17 +891,25 @@ function handleRespondEnvido(
       newState: {
         ...state,
         envidoStatus: 'resolved',
-        envidoResult: { winnerTeam, pts, reveals, pendingShow },
+        envidoLastResponse: { alias: state.aliases[socketId] ?? '', response },
+        envidoResult: { winnerTeam, pts, winnerAlias, reveals, pendingShow },
       },
     };
   }
 
   // Raise
-  return handleCallEnvido(
+  const raised = handleCallEnvido(
     { ...state, envidoStatus: 'available', envidoResponderTeam: null },
     socketId,
     response as EnvidoCallType,
   );
+  return {
+    ...raised,
+    newState: {
+      ...raised.newState,
+      envidoLastResponse: { alias: state.aliases[socketId] ?? '', response },
+    },
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -875,6 +921,12 @@ function handleCallTruco(
   socketId: string,
   callType: TrucoCallType,
 ): ActionResult {
+  if (state.phase !== 'playing')
+    return { newState: state, error: 'No se puede cantar truco en este momento.' };
+  if (state.envidoStatus === 'pending')
+    return { newState: state, error: 'Hay un envido pendiente de respuesta.' };
+  if (state.florStatus === 'pending')
+    return { newState: state, error: 'Hay una flor pendiente de respuesta.' };
   const team = getTeamSafe(state, socketId);
   if (!team) return { newState: state, error: 'No sos parte de la partida.' };
   if (state.trucoStatus === 'resolved')
@@ -936,7 +988,12 @@ function handleRespondTruco(
     const winnerTeam = state.trucoCallerTeam!;
     // Hand ends immediately (points calculated by finalizeHand based on trucoPtsIfWon)
     return finalizeHand(
-      { ...state, trucoStatus: 'resolved', trucoAccepted: false },
+      {
+        ...state,
+        trucoStatus: 'resolved',
+        trucoAccepted: false,
+        trucoLastResponse: { alias: state.aliases[socketId] ?? '', response },
+      },
       winnerTeam,
       null,
     );
@@ -948,17 +1005,25 @@ function handleRespondTruco(
         ...state,
         trucoStatus: 'resolved',
         trucoAccepted: true,
+        trucoLastResponse: { alias: state.aliases[socketId] ?? '', response },
         currentTurnSocketId: state.currentTurnSocketId, // turn continues
       },
     };
   }
 
   // Raise (retruco / valecuatro)
-  return handleCallTruco(
+  const raised = handleCallTruco(
     { ...state, trucoStatus: 'available', trucoResponderTeam: null },
     socketId,
     response as TrucoCallType,
   );
+  return {
+    ...raised,
+    newState: {
+      ...raised.newState,
+      trucoLastResponse: { alias: state.aliases[socketId] ?? '', response },
+    },
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1145,6 +1210,7 @@ export interface TrucoPlayerView {
   envidoChain: EnvidoCallEntry[];
   envidoResponderTeam: 'A' | 'B' | null;
   envidoResult: EnvidoResult | null;
+  envidoLastResponse: { alias: string; response: 'quiero' | 'noquiero' | EnvidoCallType } | null;
   pendingShowEnvido: string[]; // aliases
   myEnvidoValue: number; // private
   // Flor
@@ -1158,6 +1224,7 @@ export interface TrucoPlayerView {
   trucoResponderTeam: 'A' | 'B' | null;
   trucoPtsIfWon: number;
   trucoAccepted: boolean;
+  trucoLastResponse: { alias: string; response: 'quiero' | 'noquiero' | TrucoCallType } | null;
   // Me voy al mazo
   mazoTeam: 'A' | 'B' | null;
   // Private: your own cards
@@ -1219,6 +1286,7 @@ export function buildPlayerView(state: TrucoGameState, socketId: string): TrucoP
     envidoChain: state.envidoChain,
     envidoResponderTeam: state.envidoResponderTeam,
     envidoResult: state.envidoResult,
+    envidoLastResponse: state.envidoLastResponse,
     pendingShowEnvido: pendingShowAliases,
     myEnvidoValue: calculateEnvido(state.originalHands[socketId] ?? []),
     florStatus: state.florStatus,
@@ -1230,6 +1298,7 @@ export function buildPlayerView(state: TrucoGameState, socketId: string): TrucoP
     trucoResponderTeam: state.trucoResponderTeam,
     trucoPtsIfWon: state.trucoPtsIfWon,
     trucoAccepted: state.trucoAccepted,
+    trucoLastResponse: state.trucoLastResponse,
     mazoTeam: state.mazoTeam,
     myHand: state.hands[socketId] ?? [],
     opponentCardCounts,
