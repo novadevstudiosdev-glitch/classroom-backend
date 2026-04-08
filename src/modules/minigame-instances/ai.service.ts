@@ -4,7 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MinigameInstance } from './entities/minigame-instance.entity';
 
-export type GenerateGameType = 'quiz' | 'wordsearch' | 'preguntados';
+export type GenerateGameType = 'quiz' | 'wordsearch' | 'anagram' | 'preguntados';
 
 export interface GenerateGameDto {
   type: GenerateGameType;
@@ -45,6 +45,8 @@ export class AIService {
       ? this.buildQuizPrompt(topic, count, lang)
       : dto.type === 'preguntados'
       ? this.buildPreguntadosPrompt(topic, count, lang, dto.categories)
+      : dto.type === 'anagram'
+      ? this.buildAnagramPrompt(topic, count, lang)
       : this.buildWordsearchPrompt(topic, count, lang);
 
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -115,6 +117,23 @@ Reglas:
 - Longitud entre 4 y 12 letras por palabra
 - Palabras variadas y representativas del tema
 - No uses markdown ni bloques de código en tu respuesta`;
+  }
+
+  private buildAnagramPrompt(topic: string, count: number, lang: string): string {
+    return `GenerÃ¡ una lista de palabras para un juego de anagramas sobre "${topic}" en idioma ${lang === 'es' ? 'espaÃ±ol' : lang}.
+
+DevolvÃ© SOLO un JSON vÃ¡lido con esta estructura exacta, sin texto adicional, sin bloques de cÃ³digo:
+{
+  "title": "TÃ­tulo atractivo del juego de anagramas",
+  "words": ["PALABRA1", "PALABRA2", "PALABRA3"]
+}
+
+Reglas:
+- GenerÃ¡ exactamente ${count} palabras relacionadas con el tema
+- Todas en MAYÃšSCULAS, sin espacios
+- UsÃ¡ letras del espaÃ±ol (se permiten Ã‘, Ã, Ã‰, Ã, Ã“, Ãš)
+- Longitud entre 4 y 10 letras por palabra (para que sea jugable)
+- No uses markdown ni bloques de cÃ³digo en tu respuesta`;
   }
 
   private buildPreguntadosPrompt(topic: string, questionsPerCat: number, lang: string, fixedCategories?: string[]): string {
@@ -232,6 +251,13 @@ ${catRule}
         w.toUpperCase().replace(/[^A-ZÁÉÍÓÚÑÜ]/g, ''),
       ).filter((w: string) => w.length >= 3);
       if (!words.length) throw new BadRequestException('La IA no generó palabras. Intentá de nuevo.');
+      if (type === 'anagram') {
+        return {
+          type: 'anagram',
+          title: parsed.title ?? `Anagrama: ${topic}`,
+          words,
+        };
+      }
       return {
         type: 'wordsearch',
         title: parsed.title ?? `Sopa de letras: ${topic}`,
@@ -265,6 +291,8 @@ ${catRule}
     if (gameType === 'quiz') {
       questionCount = Array.isArray(content_json?.questions) ? content_json.questions.length : 0;
     } else if (gameType === 'wordsearch') {
+      questionCount = Array.isArray(content_json?.words) ? content_json.words.length : 0;
+    } else if (gameType === 'anagram') {
       questionCount = Array.isArray(content_json?.words) ? content_json.words.length : 0;
     } else if (gameType === 'preguntados') {
       const cats = Array.isArray(content_json?.categories) ? content_json.categories : [];

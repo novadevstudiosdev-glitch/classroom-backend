@@ -545,6 +545,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           questionCount = cats.reduce((sum: number, c: any) => sum + (c.questions?.length ?? 0), 0);
         } else if (type === 'wordsearch') {
           questionCount = Array.isArray(content?.words) ? content.words.length : 0;
+        } else if (type === 'anagram') {
+          if (Array.isArray(content?.words)) questionCount = content.words.length;
+          else questionCount = content?.word ? 1 : 0;
         }
       }
       return {
@@ -585,18 +588,93 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (gameType === 'quiz') {
       const rawQuestions = Array.isArray(contentJson) ? contentJson : (contentJson?.questions ?? []);
       if (rawQuestions.length === 0) { client.emit('error', { message: 'El quiz no tiene preguntas.' }); return; }
-      // Normalise to {text, options:[{id,text}], correct_option_id} regardless of source format
+      const shuffle = <T>(arr: T[]): T[] => {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+      };
+      const normText = (v: unknown) => String(v ?? '').trim();
+      const normAnswer = (v: unknown) =>
+        normText(v)
+          .toUpperCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^A-Z0-9 ]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
       room.questions = rawQuestions.map((q: any) => {
+        const type = String(q?.type ?? 'mcq') as 'mcq' | 'true_false' | 'fill_blank' | 'order' | 'match';
+        const base = {
+          type,
+          text: q.text ?? q.question ?? '',
+          points_correct: q.points_correct ?? 100,
+          time_limit_ms: q.time_limit_ms ?? room.timeLimitMs,
+        };
+
+        if (type === 'true_false') {
+          const correctBool = typeof q.correct === 'boolean'
+            ? q.correct
+            : String(q.correct_option_id ?? '').toLowerCase() === 'true';
+          return {
+            ...base,
+            options: [
+              { id: 'true', text: 'Verdadero' },
+              { id: 'false', text: 'Falso' },
+            ],
+            correct_option_id: correctBool ? 'true' : 'false',
+          };
+        }
+
+        if (type === 'fill_blank') {
+          const answerRaw = normText(q.answer ?? q.correct ?? '');
+          return {
+            ...base,
+            answer_raw: answerRaw,
+            answer_norm: normAnswer(answerRaw),
+          };
+        }
+
+        if (type === 'order') {
+          const itemsRaw: string[] = Array.isArray(q.items) ? q.items.map(normText).filter(Boolean) : [];
+          return {
+            ...base,
+            items_client: shuffle(itemsRaw),
+            correct_items_raw: itemsRaw,
+            correct_items_norm: itemsRaw.map(normAnswer),
+          };
+        }
+
+        if (type === 'match') {
+          const pairsRaw: { left: string; right: string }[] = Array.isArray(q.pairs)
+            ? q.pairs.map((p: any) => ({ left: normText(p?.left), right: normText(p?.right) })).filter((p: any) => p.left && p.right)
+            : [];
+          const left = pairsRaw.map((p) => p.left);
+          const right = pairsRaw.map((p) => p.right);
+          const correct_map_norm: Record<string, string> = {};
+          for (const p of pairsRaw) correct_map_norm[normAnswer(p.left)] = normAnswer(p.right);
+          return {
+            ...base,
+            left,
+            right_client: shuffle(right),
+            correct_pairs_raw: pairsRaw,
+            correct_map_norm,
+          };
+        }
+
+        // Default: MCQ (backwards compatible)
         const opts: any[] = Array.isArray(q.options) ? q.options : [];
         const normOpts = opts.map((o: any, i: number) =>
           typeof o === 'string' ? { id: String(i), text: o } : o,
         );
         return {
-          text: q.text ?? q.question ?? '',
+          ...base,
+          type: 'mcq',
           options: normOpts,
           correct_option_id: String(q.correct_option_id ?? '0'),
-          points_correct: q.points_correct ?? 100,
-          time_limit_ms: q.time_limit_ms ?? room.timeLimitMs,
         };
       });
       room.gameData = null;
@@ -608,8 +686,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
     } else if (gameType === 'anagram') {
       room.questions = [];
+      const direct = String(contentJson?.word ?? '').trim().toUpperCase();
+      const poolRaw: unknown = contentJson?.words;
+      const pool: string[] = Array.isArray(poolRaw)
+        ? (poolRaw as any[]).map((w) => String(w ?? '').trim().toUpperCase().replace(/[^A-ZÃÃ‰ÃÃ“ÃšÃ‘Ãœ]/g, '')).filter(Boolean)
+        : [];
+      const words: string[] = [
+        ...(direct ? [direct] : []),
+        ...pool.filter((w) => w !== direct),
+      ];
+      if (!words.length) { client.emit('error', { message: 'El anagrama no tiene palabras.' }); return; }
+      // Shuffle once on the server so all players share the same word order
+      for (let i = words.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [words[i], words[j]] = [words[j], words[i]];
+      }
       room.gameData = {
-        word: (contentJson?.word ?? '').toUpperCase(),
+        words,
         hint: contentJson?.hint ?? '',
       };
     } else if (gameType === 'preguntados') {
@@ -1155,7 +1248,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('submit-answer')
   handleSubmitAnswer(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { optionId: string },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    @MessageBody() data: any,
   ) {
     const roomCode = this.socketRoom.get(client.id);
     if (!roomCode) return;
@@ -1168,7 +1262,49 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     player.answeredThisRound = true;
 
     const q = room.questions[room.currentQ];
-    const isCorrect = data.optionId === q.correct_option_id;
+    const qt = String(q.type ?? 'mcq');
+    const normAnswer = (v: unknown) =>
+      String(v ?? '')
+        .trim()
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^A-Z0-9 ]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    let isCorrect = false;
+    const correctOptionId = (qt === 'mcq' || qt === 'true_false') ? String(q.correct_option_id ?? '') : '';
+    const correctAnswer =
+      qt === 'fill_blank' ? q.answer_raw
+      : qt === 'order' ? q.correct_items_raw
+      : qt === 'match' ? q.correct_pairs_raw
+      : null;
+
+    if (qt === 'mcq' || qt === 'true_false') {
+      const optionId = String(data?.optionId ?? '');
+      isCorrect = optionId === String(q.correct_option_id ?? '');
+    } else if (qt === 'fill_blank') {
+      const text = String(data?.text ?? data?.answer ?? '');
+      isCorrect = normAnswer(text) === String(q.answer_norm ?? '');
+    } else if (qt === 'order') {
+      const order = Array.isArray(data?.order) ? data.order : [];
+      const norm = order.map(normAnswer);
+      const exp: string[] = Array.isArray(q.correct_items_norm) ? q.correct_items_norm : [];
+      isCorrect = norm.length === exp.length && norm.every((v: string, i: number) => v === exp[i]);
+    } else if (qt === 'match') {
+      const matches = (data?.matches && typeof data.matches === 'object') ? data.matches : {};
+      const left: string[] = Array.isArray(q.left) ? q.left : [];
+      const cmap: Record<string, string> = q.correct_map_norm ?? {};
+      isCorrect = left.length > 0 && left.every((l) => {
+        const k = normAnswer(l);
+        const got = normAnswer(matches[l] ?? matches[k] ?? '');
+        return got && got === String(cmap[k] ?? '');
+      });
+    } else {
+      const optionId = String(data?.optionId ?? '');
+      isCorrect = optionId === String(q.correct_option_id ?? '');
+    }
     const elapsed = Date.now() - room.questionStartedAt;
     const timeLimitMs = q.time_limit_ms ?? room.timeLimitMs;
 
@@ -1179,8 +1315,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     client.emit('answer-result', {
+      questionType: qt,
       correct: isCorrect,
-      correctOptionId: q.correct_option_id,
+      correctOptionId,
+      correctAnswer,
       score: player.score,
     });
 
@@ -1280,8 +1418,24 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const timeLimitMs = q.time_limit_ms ?? room.timeLimitMs;
     room.questionStartedAt = Date.now();
 
-    const { correct_option_id, ...questionForClient } = q;
-    void correct_option_id;
+    // Strip correct answer data before sending to clients
+    let questionForClient: any = null;
+    const qt = String(q.type ?? 'mcq');
+    if (qt === 'mcq' || qt === 'true_false') {
+      const { correct_option_id, ...rest } = q;
+      void correct_option_id;
+      questionForClient = rest;
+    } else if (qt === 'fill_blank') {
+      questionForClient = { type: 'fill_blank', text: q.text, image_url: q.image_url };
+    } else if (qt === 'order') {
+      questionForClient = { type: 'order', text: q.text, items: q.items_client ?? [] };
+    } else if (qt === 'match') {
+      questionForClient = { type: 'match', text: q.text, left: q.left ?? [], right: q.right_client ?? [] };
+    } else {
+      const { correct_option_id, ...rest } = q;
+      void correct_option_id;
+      questionForClient = rest;
+    }
 
     this.server.to(roomCode).emit('question', {
       index: room.currentQ,
@@ -1297,8 +1451,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (room.status !== 'playing') return;
 
     const q = room.questions[room.currentQ];
+    const qt = String(q.type ?? 'mcq');
+    const correctOptionId = (qt === 'mcq' || qt === 'true_false') ? q.correct_option_id : '';
+    const correctAnswer =
+      qt === 'fill_blank' ? q.answer_raw
+      : qt === 'order' ? q.correct_items_raw
+      : qt === 'match' ? q.correct_pairs_raw
+      : null;
     this.server.to(roomCode).emit('round-end', {
-      correctOptionId: q.correct_option_id,
+      questionType: qt,
+      correctOptionId,
+      correctAnswer,
       scoreboard: this.buildScoreboard(room),
     });
 
