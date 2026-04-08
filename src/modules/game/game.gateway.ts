@@ -834,7 +834,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       const modeCount: Record<string, number> = { '1v1': 2, '2v2': 4, '3v3': 6 };
       const required = modeCount[room.trucoConfig.mode] ?? 2;
-      if (room.players.size !== required) {
+      if (room.players.size < 1) {
         room.status = 'waiting';
         client.emit('error', {
           message: `Se necesitan exactamente ${required} jugadores para el modo ${room.trucoConfig.mode}.`
@@ -1189,7 +1189,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const allAnswered = [...room.players.values()].every(p => p.answeredThisRound);
     if (allAnswered) {
       if (room.timer) clearTimeout(room.timer);
-      setTimeout(() => this.advanceQuestion(roomCode, room), 1500);
+      setTimeout(() => this.advanceQuestion(roomCode, room), 800);
     }
   }
 
@@ -1309,7 +1309,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       } else {
         this.endGame(roomCode, room);
       }
-    }, 3000);
+    }, 1500);
   }
 
   private endGame(roomCode: string, room: Room) {
@@ -1318,7 +1318,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     setTimeout(() => {
       this.rooms.delete(roomCode);
       this.emitRoomsUpdate();
-    }, 5 * 60 * 1000);
+    }, 30 * 60 * 1000);
   }
 
   private buildScoreboard(room: Room) {

@@ -9,7 +9,7 @@ export type GenerateGameType = 'quiz' | 'wordsearch' | 'preguntados';
 export interface GenerateGameDto {
   type: GenerateGameType;
   topic: string;          // e.g. "Historia Argentina"
-  language?: string;      // default 'es'
+  language?: string;      // default 'e/s'
   count?: number;         // questions for quiz, words for wordsearch
   categories?: string[];  // optional fixed category names for preguntados classic mode
 }
@@ -110,7 +110,8 @@ Devolvé SOLO un JSON válido con esta estructura exacta, sin texto adicional, s
 
 Reglas:
 - Generá exactamente ${count} palabras relacionadas con el tema
-- Todas en MAYÚSCULAS, sin espacios ni acentos ni caracteres especiales
+- Todas en MAYÚSCULAS, sin espacios
+- Usá letras del español (se permiten Ñ, Á, É, Í, Ó, Ú)
 - Longitud entre 4 y 12 letras por palabra
 - Palabras variadas y representativas del tema
 - No uses markdown ni bloques de código en tu respuesta`;
@@ -228,7 +229,7 @@ ${catRule}
       };
     } else {
       const words: string[] = (parsed.words ?? []).map((w: string) =>
-        w.toUpperCase().replace(/[^A-Z]/g, ''),
+        w.toUpperCase().replace(/[^A-ZÁÉÍÓÚÑÜ]/g, ''),
       ).filter((w: string) => w.length >= 3);
       if (!words.length) throw new BadRequestException('La IA no generó palabras. Intentá de nuevo.');
       return {
