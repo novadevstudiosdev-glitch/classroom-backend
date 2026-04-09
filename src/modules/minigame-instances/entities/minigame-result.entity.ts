@@ -43,11 +43,9 @@ export class MinigameResult {
   @Column({ type: 'int', default: 0 })
   time_taken_seconds: number;
 
-  // Array de { question_id, selected_option_id, is_correct, time_taken_ms, points_earned }
   @Column({ type: 'jsonb', default: [] })
   answers: Record<string, any>[];
 
-  // Snapshot del content_json al momento de jugar (para no perder datos si el docente edita)
   @Column({ type: 'jsonb', default: [] })
   content_snapshot: Record<string, any>[];
 

@@ -5,11 +5,14 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Lesson } from './lesson.entity';
 import { Classroom } from '../../classrooms/entities/classroom.entity';
 
 @Entity('lesson_assignments')
+@Index(['classroom_id'])
+@Index(['lesson_id'])
 export class LessonAssignment {
   @PrimaryGeneratedColumn('uuid')
   id: string;

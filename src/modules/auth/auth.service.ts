@@ -548,4 +548,41 @@ export class AuthService {
 
     return { access_token, refresh_token };
   }
+
+  async getMyProfile(userId: string, role: string): Promise<{
+    id: string;
+    email: string;
+    role: string;
+    profile_id: string;
+    name: string;
+  }> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuario no encontrado.');
+
+    let firstName = '';
+    let lastName = '';
+    let profileId = '';
+
+    switch (role) {
+      case 'teacher': {
+        const p = await this.teacherRepo.findOne({ where: { user_id: userId } });
+        if (p) { firstName = p.first_name; lastName = p.last_name; profileId = p.id; }
+        break;
+      }
+      case 'student': {
+        const p = await this.studentRepo.findOne({ where: { user_id: userId } });
+        if (p) { firstName = p.alias; profileId = p.id; }
+        break;
+      }
+      case 'parent': {
+        const p = await this.parentRepo.findOne({ where: { user_id: userId } });
+        if (p) { firstName = p.first_name; lastName = p.last_name; profileId = p.id; }
+        break;
+      }
+    }
+
+    const name = `${firstName} ${lastName}`.trim() || user.email;
+
+    return { id: userId, email: user.email, role, profile_id: profileId, name };
+  }
 }

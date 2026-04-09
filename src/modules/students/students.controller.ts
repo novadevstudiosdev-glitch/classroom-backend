@@ -26,14 +26,17 @@ export class StudentsController {
   @Patch('me/profile')
   @ApiOperation({ summary: 'Actualizar perfil del alumno (alias, avatar, bio, estado, fecha de nacimiento)' })
   @ApiResponse({ status: 200, description: 'Perfil actualizado.' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
   updateProfile(@CurrentUser() user: any, @Body() dto: UpdateStudentProfileDto) {
     return this.studentsService.updateProfile(user.sub, dto);
   }
 
   @Post('me/link-code')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Obtener o generar código de vinculación para que el padre se conecte' })
-  @ApiResponse({ status: 200, description: 'Código de vinculación.' })
+  @ApiOperation({ summary: 'Obtener o generar código de vinculación para que el padre se conecte', description: 'Si ya existe un link_code lo retorna; si no, genera uno nuevo de 8 caracteres.' })
+  @ApiResponse({ status: 200, description: 'Código de vinculación (8 chars).' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
   getLinkCode(@CurrentUser() user: any) {
     return this.studentsService.generateLinkCode(user.sub);
   }
@@ -64,8 +67,9 @@ export class StudentsController {
   }
 
   @Get('me/feed')
-  @ApiOperation({ summary: 'Feed del alumno: lecciones y minijuegos de todas sus clases activas' })
+  @ApiOperation({ summary: 'Feed del alumno: lecciones y minijuegos de todas sus clases activas', description: 'Retorna el contenido agrupado por clase, con estado de progreso de cada ítem.' })
   @ApiResponse({ status: 200, description: 'Feed consolidado por clase.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
   getFeed(@CurrentUser() user: any) {
     return this.studentsService.getFeed(user.sub);
   }

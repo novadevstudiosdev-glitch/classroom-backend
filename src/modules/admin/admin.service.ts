@@ -255,7 +255,7 @@ export class AdminService {
   // ─────────────────────────────────────────────────
 
   async listMinigames() {
-    return this.minigameRepo.find({ order: { created_at: 'DESC' } });
+    return this.minigameRepo.find({ order: { created_at: 'DESC' }, take: 200 });
   }
 
   async createMinigame(dto: CreateMinigameDto) {

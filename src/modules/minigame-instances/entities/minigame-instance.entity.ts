@@ -37,6 +37,14 @@ export class MinigameInstance {
   @Column({ default: false })
   is_public: boolean;
 
+  // Tipo de juego: 'quiz' | 'wordsearch' | 'anagram' | 'preguntados'
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  game_type: string | null;
+
+  // Cantidad de preguntas/palabras (evita parsear content_json en el listado)
+  @Column({ type: 'int', nullable: true, default: 0 })
+  question_count: number;
+
   @OneToMany(() => MinigameInstanceAssignment, (a) => a.instance)
   assignments: MinigameInstanceAssignment[];
 

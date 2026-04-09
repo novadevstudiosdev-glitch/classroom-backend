@@ -100,6 +100,7 @@ export class ProgressService {
     return this.progressRepo.find({
       where: { student_id: studentProfileId },
       order: { updated_at: 'DESC' },
+      take: 500,
     });
   }
 }

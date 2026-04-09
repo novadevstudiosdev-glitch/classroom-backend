@@ -100,6 +100,8 @@ export class ExercisesController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Obtener un ejercicio por ID' })
+  @ApiResponse({ status: 200, description: 'Datos del ejercicio con config_json.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
   @ApiResponse({ status: 404, description: 'Ejercicio no encontrado.' })
   async findOne(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.exercisesService.findOne(user.sub, id);
@@ -164,7 +166,8 @@ export class ExercisesController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Editar un ejercicio' })
+  @ApiOperation({ summary: 'Editar un ejercicio', description: 'Solo el docente dueño de la lección puede editar sus ejercicios.' })
+  @ApiParam({ name: 'id', description: 'UUID del ejercicio' })
   @ApiBody({
     description: 'Todos los campos son opcionales. Si mandás config_json debe matchear el tipo original del ejercicio.',
     examples: {
@@ -223,6 +226,10 @@ export class ExercisesController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Eliminar un ejercicio' })
+  @ApiParam({ name: 'id', description: 'UUID del ejercicio' })
+  @ApiResponse({ status: 200, description: 'Ejercicio eliminado.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
+  @ApiResponse({ status: 403, description: 'No sos el dueño de este ejercicio.' })
   @ApiResponse({ status: 404, description: 'Ejercicio no encontrado.' })
   async remove(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.exercisesService.remove(user.sub, id);

@@ -6,12 +6,15 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
   Unique,
+  Index,
 } from 'typeorm';
 
 export type LessonProgressStatus = 'in_progress' | 'completed';
 
 @Entity('lesson_progress')
 @Unique(['student_id', 'lesson_id'])
+@Index(['student_id'])
+@Index(['lesson_id'])
 export class LessonProgress {
   @PrimaryGeneratedColumn('uuid')
   id: string;

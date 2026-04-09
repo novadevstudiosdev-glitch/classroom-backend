@@ -175,7 +175,8 @@ export class StudentsService {
          AND lp.student_id::text = $1
          AND lp.deleted_at IS NULL
        WHERE la.classroom_id::text = ANY($2::text[])
-       ORDER BY la.assigned_at DESC`,
+       ORDER BY la.assigned_at DESC
+       LIMIT 200`,
       [student.id, classroomIds],
     );
 
@@ -191,7 +192,8 @@ export class StudentsService {
        JOIN minigame_instances mi ON mi.id::text = mia.instance_id::text AND mi.deleted_at IS NULL
        JOIN minigames mg ON mg.id::text = mi.minigame_id::text AND mg.deleted_at IS NULL
        WHERE mia.classroom_id::text = ANY($1::text[])
-       ORDER BY mia.assigned_at DESC`,
+       ORDER BY mia.assigned_at DESC
+       LIMIT 100`,
       [classroomIds],
     );
 
