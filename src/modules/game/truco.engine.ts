@@ -55,6 +55,13 @@ export interface EnvidoResult {
   pendingShow: string[];
 }
 
+export type EnvidoResponseType =
+  | 'quiero'
+  | 'noquiero'
+  | 'sonbuenas'
+  | 'decirpuntos'
+  | EnvidoCallType;
+
 export interface HandEndResult {
   trucoWinnerTeam: 'A' | 'B' | null;
   mazoTeam: 'A' | 'B' | null;
@@ -89,6 +96,7 @@ export interface TrucoGameState {
   // Sub-rounds (0=primera, 1=segunda, 2=tercera)
   round: number;
   playedInRound: Record<string, TrucoCard | null>; // who played what this sub-round
+  playedCardsHistory: { socketId: string; round: number; card: TrucoCard }[]; // all cards played this hand
   roundOrder: string[]; // seat order starting from current round leader
   roundWinners: ('A' | 'B' | 'tie')[]; // result per sub-round
   lastPlayedCards: Record<string, TrucoCard>; // last card each player played (for display)
@@ -99,7 +107,7 @@ export interface TrucoGameState {
   envidoCallerTeam: 'A' | 'B' | null;
   envidoResponderTeam: 'A' | 'B' | null;
   envidoResult: EnvidoResult | null;
-  envidoLastResponse: { alias: string; response: 'quiero' | 'noquiero' | EnvidoCallType } | null;
+  envidoLastResponse: { alias: string; response: EnvidoResponseType } | null;
   // After quiero: winner team must show cards in pendingShowEnvido window
   pendingShowEnvido: string[]; // socketIds who must show/hide
 
@@ -133,7 +141,7 @@ export interface TrucoGameState {
 export type TrucoAction =
   | { type: 'play-card'; cardIndex: number }
   | { type: 'call-envido'; callType: EnvidoCallType }
-  | { type: 'respond-envido'; response: 'quiero' | 'noquiero' | EnvidoCallType }
+  | { type: 'respond-envido'; response: EnvidoResponseType }
   | { type: 'call-truco'; callType: TrucoCallType }
   | { type: 'respond-truco'; response: 'quiero' | 'noquiero' | TrucoCallType }
   | { type: 'declare-flor' }
@@ -281,6 +289,7 @@ export function initTrucoGame(
     originalHands: {},
     round: 0,
     playedInRound: {},
+    playedCardsHistory: [],
     roundOrder: [],
     roundWinners: [],
     lastPlayedCards: {},
@@ -348,6 +357,7 @@ export function dealHand(state: TrucoGameState): TrucoGameState {
     originalHands: { ...hands },
     round: 0,
     playedInRound,
+    playedCardsHistory: [],
     roundOrder,
     roundWinners: [],
     lastPlayedCards: {},
@@ -444,6 +454,7 @@ function handlePlayCard(state: TrucoGameState, socketId: string, cardIndex: numb
   const newHand = hand.filter((_, i) => i !== cardIndex);
   const newPlayedInRound = { ...state.playedInRound, [socketId]: card };
   const newLastPlayed = { ...state.lastPlayedCards, [socketId]: card };
+  const newPlayedCardsHistory = [...state.playedCardsHistory, { socketId, round: state.round, card }];
 
   // Expire envido if truco was already resolved or if we're past round 0
   let newEnvidoStatus = state.envidoStatus;
@@ -455,6 +466,7 @@ function handlePlayCard(state: TrucoGameState, socketId: string, cardIndex: numb
     ...state,
     hands: { ...state.hands, [socketId]: newHand },
     playedInRound: newPlayedInRound,
+    playedCardsHistory: newPlayedCardsHistory,
     lastPlayedCards: newLastPlayed,
     envidoStatus: newEnvidoStatus,
   };
@@ -787,6 +799,8 @@ function handleCallEnvido(
     return { newState: state, error: 'El truco ya fue resuelto.' };
 
   const chain = state.envidoChain;
+  if (chain.some((call) => call.type === callType))
+    return { newState: state, error: 'Ese canto ya fue realizado en esta mano.' };
 
   // Validate sequence
   if (chain.length > 0) {
@@ -819,13 +833,13 @@ function isValidEnvidoRaise(current: EnvidoCallType, raise: EnvidoCallType): boo
   const ci = order.indexOf(current);
   const ri = order.indexOf(raise);
   if (ci < 0 || ri < 0) return false;
-  return ri >= ci; // can call same or higher
+  return ri > ci; // only higher raise is valid
 }
 
 function handleRespondEnvido(
   state: TrucoGameState,
   socketId: string,
-  response: 'quiero' | 'noquiero' | EnvidoCallType,
+  response: EnvidoResponseType,
 ): ActionResult {
   const team = getTeamSafe(state, socketId);
   if (!team) return { newState: state, error: 'No sos parte de la partida.' };
@@ -834,7 +848,7 @@ function handleRespondEnvido(
   if (state.envidoResponderTeam !== team)
     return { newState: state, error: 'No es tu equipo el que debe responder.' };
 
-  if (response === 'noquiero') {
+  if (response === 'noquiero' || response === 'sonbuenas') {
     const pts = envidoChainNoQuieroValue(state.envidoChain);
     const winnerTeam = state.envidoCallerTeam!;
     return {
@@ -847,7 +861,7 @@ function handleRespondEnvido(
     };
   }
 
-  if (response === 'quiero') {
+  if (response === 'quiero' || response === 'decirpuntos') {
     // Calculate envido for all players
     const reveals = state.seatOrder.map((sid) => ({
       socketId: sid,
@@ -1205,12 +1219,14 @@ export interface TrucoPlayerView {
   lastPlayedCards: Record<string, TrucoCard>;
   // Cards played in current round (face-up)
   currentRoundCards: Record<string, TrucoCard | null>;
+  // Cards played in this hand (accumulated by round)
+  playedCardsHistory: { alias: string; round: number; card: TrucoCard }[];
   // Envido
   envidoStatus: TrucoGameState['envidoStatus'];
   envidoChain: EnvidoCallEntry[];
   envidoResponderTeam: 'A' | 'B' | null;
   envidoResult: EnvidoResult | null;
-  envidoLastResponse: { alias: string; response: 'quiero' | 'noquiero' | EnvidoCallType } | null;
+  envidoLastResponse: { alias: string; response: EnvidoResponseType } | null;
   pendingShowEnvido: string[]; // aliases
   myEnvidoValue: number; // private
   // Flor
@@ -1256,6 +1272,12 @@ export function buildPlayerView(state: TrucoGameState, socketId: string): TrucoP
   for (const [sid, card] of Object.entries(state.lastPlayedCards))
     lastPlayed[state.aliases[sid] ?? sid] = card;
 
+  const playedCardsHistory = state.playedCardsHistory.map((entry) => ({
+    alias: state.aliases[entry.socketId] ?? entry.socketId,
+    round: entry.round,
+    card: entry.card,
+  }));
+
   const opponentCardCounts: Record<string, number> = {};
   for (const sid of state.seatOrder) {
     if (sid !== socketId)
@@ -1282,6 +1304,7 @@ export function buildPlayerView(state: TrucoGameState, socketId: string): TrucoP
     roundWinners: state.roundWinners,
     lastPlayedCards: lastPlayed,
     currentRoundCards,
+    playedCardsHistory,
     envidoStatus: state.envidoStatus,
     envidoChain: state.envidoChain,
     envidoResponderTeam: state.envidoResponderTeam,

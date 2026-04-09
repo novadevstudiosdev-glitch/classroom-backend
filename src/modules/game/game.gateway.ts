@@ -83,6 +83,12 @@ function translateTrucoAction(state: TrucoGameState, socketId: string, raw: any)
       if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'noquiero' };
       if (state.trucoStatus === 'pending')  return { type: 'respond-truco',  response: 'noquiero' };
       return { type: 'respond-envido', response: 'noquiero' }; // fallback
+    case 'son-buenas':
+      if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'sonbuenas' };
+      return { type: 'respond-envido', response: 'sonbuenas' }; // fallback
+    case 'decir-puntos':
+      if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'decirpuntos' };
+      return { type: 'respond-envido', response: 'decirpuntos' }; // fallback
 
     /* ── Flor ── */
     case 'flor':              return { type: 'declare-flor' };
