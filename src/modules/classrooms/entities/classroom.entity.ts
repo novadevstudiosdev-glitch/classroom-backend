@@ -3,6 +3,7 @@ import { TeacherProfile } from '../../teachers/entities/teacher-profile.entity';
 import { ClassroomStudent } from './classroom-student.entity';
 
 export type GradeLevel = '1st' | '2nd' | '3rd' | '4th' | '5th' | '6th';
+export type ClassroomStatus = 'active' | 'pending' | 'finished';
 
 @Entity('classrooms')
 export class Classroom {
@@ -30,6 +31,9 @@ export class Classroom {
 
   @OneToMany(() => ClassroomStudent, (cs) => cs.classroom)
   classroom_students: ClassroomStudent[];
+
+  @Column({ type: 'varchar', length: 20, default: 'active' })
+  status: ClassroomStatus;
 
   @Column({ default: false })
   is_archived: boolean;
