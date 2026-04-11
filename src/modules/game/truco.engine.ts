@@ -114,6 +114,7 @@ export interface TrucoGameState {
   envidoCallerTeam: 'A' | 'B' | null;
   envidoResponderTeam: 'A' | 'B' | null;
   envidoResult: EnvidoResult | null;
+  envidoPointsAwarded: boolean;
   envidoLastResponse: { alias: string; response: EnvidoResponseType } | null;
   // After quiero: winner team must show cards in pendingShowEnvido window
   pendingShowEnvido: string[]; // socketIds who must show/hide
@@ -305,6 +306,7 @@ export function initTrucoGame(
     envidoCallerTeam: null,
     envidoResponderTeam: null,
     envidoResult: null,
+    envidoPointsAwarded: false,
     envidoLastResponse: null,
     pendingShowEnvido: [],
     florMustDeclare: [],
@@ -373,6 +375,7 @@ export function dealHand(state: TrucoGameState): TrucoGameState {
     envidoCallerTeam: null,
     envidoResponderTeam: null,
     envidoResult: null,
+    envidoPointsAwarded: false,
     envidoLastResponse: null,
     pendingShowEnvido: [],
     florMustDeclare,
@@ -612,9 +615,10 @@ function finalizeHand(
   if (state.envidoResult) {
     envPts[state.envidoResult.winnerTeam] = state.envidoResult.pts;
   }
+  const envToApplyNow = state.envidoPointsAwarded ? { A: 0, B: 0 } : envPts;
 
-  const newTeamAScore = state.teamAScore + envPts.A + trucoPts.A;
-  const newTeamBScore = state.teamBScore + envPts.B + trucoPts.B;
+  const newTeamAScore = state.teamAScore + envToApplyNow.A + trucoPts.A;
+  const newTeamBScore = state.teamBScore + envToApplyNow.B + trucoPts.B;
 
   const isGameOver =
     newTeamAScore >= state.config.maxPoints || newTeamBScore >= state.config.maxPoints;
@@ -633,6 +637,7 @@ function finalizeHand(
   const needsShow =
     state.envidoResult !== null &&
     state.envidoResult.pts > 0 &&
+    !state.envidoPointsAwarded &&
     state.envidoResult.pendingShow.length > 0;
 
   if (needsShow) {
@@ -810,6 +815,52 @@ function isValidEnvidoRaise(chain: EnvidoCallEntry[], raise: EnvidoCallType): bo
   return false;
 }
 
+function applyEnvLikeScore(
+  state: TrucoGameState,
+  envidoResult: EnvidoResult,
+): Pick<TrucoGameState, 'teamAScore' | 'teamBScore' | 'phase' | 'handEndResult'> {
+  const addA = envidoResult.winnerTeam === 'A' ? envidoResult.pts : 0;
+  const addB = envidoResult.winnerTeam === 'B' ? envidoResult.pts : 0;
+  const teamAScore = state.teamAScore + addA;
+  const teamBScore = state.teamBScore + addB;
+  const isGameOver = teamAScore >= state.config.maxPoints || teamBScore >= state.config.maxPoints;
+
+  return {
+    teamAScore,
+    teamBScore,
+    phase: isGameOver ? 'game_over' : state.phase,
+    handEndResult: isGameOver
+      ? {
+          trucoWinnerTeam: null,
+          mazoTeam: null,
+          envPts: { A: addA, B: addB },
+          trucoPts: { A: 0, B: 0 },
+          allCards: {},
+          newTeamAScore: teamAScore,
+          newTeamBScore: teamBScore,
+        }
+      : state.handEndResult,
+  };
+}
+
+function resolveEnvidoWithScore(
+  state: TrucoGameState,
+  responderAlias: string,
+  response: EnvidoResponseType,
+  envidoResult: EnvidoResult,
+): TrucoGameState {
+  const scored = applyEnvLikeScore(state, envidoResult);
+
+  return {
+    ...state,
+    ...scored,
+    envidoStatus: 'resolved',
+    envidoLastResponse: { alias: responderAlias, response },
+    envidoResult,
+    envidoPointsAwarded: true,
+  };
+}
+
 function handleCallEnvido(
   state: TrucoGameState,
   socketId: string,
@@ -871,13 +922,14 @@ function handleRespondEnvido(
   if (response === 'noquiero' || response === 'sonbuenas') {
     const pts = envidoChainNoQuieroValue(state.envidoChain);
     const winnerTeam = state.envidoCallerTeam!;
+    const resolvedState = resolveEnvidoWithScore(
+      state,
+      state.aliases[socketId] ?? '',
+      response,
+      { winnerTeam, pts, reveals: [], pendingShow: [] },
+    );
     return {
-      newState: {
-        ...state,
-        envidoStatus: 'resolved',
-        envidoLastResponse: { alias: state.aliases[socketId] ?? '', response },
-        envidoResult: { winnerTeam, pts, reveals: [], pendingShow: [] },
-      },
+      newState: resolvedState,
     };
   }
 
@@ -918,16 +970,15 @@ function handleRespondEnvido(
       }
     }
 
-    // Winner team's players must show their envido cards
-    const pendingShow = teamPlayers(state, winnerTeam);
+    const resolvedState = resolveEnvidoWithScore(
+      state,
+      state.aliases[socketId] ?? '',
+      response,
+      { winnerTeam, pts, winnerAlias, reveals, pendingShow: [] },
+    );
 
     return {
-      newState: {
-        ...state,
-        envidoStatus: 'resolved',
-        envidoLastResponse: { alias: state.aliases[socketId] ?? '', response },
-        envidoResult: { winnerTeam, pts, winnerAlias, reveals, pendingShow },
-      },
+      newState: resolvedState,
     };
   }
 
@@ -1100,12 +1151,16 @@ function handleRespondFlor(
 
   if (response === 'congangamos') {
     // Opponent doesn't have flor → caller wins 3 pts (Flor)
+    const envidoResult: EnvidoResult = { winnerTeam: callerTeam, pts: 3, reveals: [], pendingShow: [] };
+    const scored = applyEnvLikeScore(state, envidoResult);
     return {
       newState: {
         ...state,
+        ...scored,
         florStatus: 'resolved',
         envidoStatus: 'resolved',
-        envidoResult: { winnerTeam: callerTeam, pts: 3, reveals: [], pendingShow: [] },
+        envidoResult,
+        envidoPointsAwarded: true,
       },
     };
   }
@@ -1119,12 +1174,16 @@ function handleRespondFlor(
         respBest = Math.max(respBest, florValue(state.originalHands[sid] ?? []));
     }
     const winnerTeam: 'A' | 'B' = callerFV >= respBest ? callerTeam : team; // tie → caller wins (mano)
+    const envidoResult: EnvidoResult = { winnerTeam, pts: 3, reveals: [], pendingShow: [] };
+    const scored = applyEnvLikeScore(state, envidoResult);
     return {
       newState: {
         ...state,
+        ...scored,
         florStatus: 'resolved',
         envidoStatus: 'resolved',
-        envidoResult: { winnerTeam, pts: 3, reveals: [], pendingShow: [] },
+        envidoResult,
+        envidoPointsAwarded: true,
       },
     };
   }
@@ -1155,12 +1214,16 @@ function handleRespondFlor(
     const winnerTeam: 'A' | 'B' = respBest >= callerFV ? team : callerTeam;
     const loserScore = winnerTeam === 'A' ? state.teamBScore : state.teamAScore;
     const pts = Math.max(1, state.config.maxPoints - loserScore);
+    const envidoResult: EnvidoResult = { winnerTeam, pts, reveals: [], pendingShow: [] };
+    const scored = applyEnvLikeScore(state, envidoResult);
     return {
       newState: {
         ...state,
+        ...scored,
         florStatus: 'resolved',
         envidoStatus: 'resolved',
-        envidoResult: { winnerTeam, pts, reveals: [], pendingShow: [] },
+        envidoResult,
+        envidoPointsAwarded: true,
       },
     };
   }
@@ -1246,6 +1309,7 @@ export interface TrucoPlayerView {
   envidoChain: EnvidoCallEntry[];
   envidoResponderTeam: 'A' | 'B' | null;
   envidoResult: EnvidoResult | null;
+  envidoPointsAwarded: boolean;
   envidoLastResponse: { alias: string; response: EnvidoResponseType } | null;
   pendingShowEnvido: string[]; // aliases
   myEnvidoValue: number; // private
@@ -1329,6 +1393,7 @@ export function buildPlayerView(state: TrucoGameState, socketId: string): TrucoP
     envidoChain: state.envidoChain,
     envidoResponderTeam: state.envidoResponderTeam,
     envidoResult: state.envidoResult,
+    envidoPointsAwarded: state.envidoPointsAwarded,
     envidoLastResponse: state.envidoLastResponse,
     pendingShowEnvido: pendingShowAliases,
     myEnvidoValue: calculateEnvido(state.originalHands[socketId] ?? []),
