@@ -72,6 +72,13 @@ export interface HandEndResult {
   newTeamBScore: number;
 }
 
+export type TrucoPhase =
+  | 'playing'
+  | 'show_envido'
+  | 'show_envido_points'
+  | 'hand_end'
+  | 'game_over';
+
 export interface TrucoGameState {
   config: TrucoConfig;
   aliases: Record<string, string>; // socketId -> alias
@@ -131,7 +138,7 @@ export interface TrucoGameState {
   mazoTeam: 'A' | 'B' | null;
 
   // Phase
-  phase: 'playing' | 'show_envido' | 'hand_end' | 'game_over';
+  phase: TrucoPhase;
   handEndResult: HandEndResult | null;
   showEnvidoTimer: number; // timestamp when show-envido phase started (for timeout)
 }
@@ -639,7 +646,7 @@ function finalizeHand(
         trucoAccepted: state.trucoAccepted,
         handEndResult,
         pendingShowEnvido: state.envidoResult!.pendingShow,
-        phase: 'show_envido',
+        phase: 'show_envido_points',
         showEnvidoTimer: Date.now(),
       },
     };
@@ -662,7 +669,7 @@ function finalizeHand(
 // ─────────────────────────────────────────────────────────────────────────────
 
 function handleShowEnvido(state: TrucoGameState, socketId: string, show: boolean): ActionResult {
-  if (state.phase !== 'show_envido')
+  if (state.phase !== 'show_envido' && state.phase !== 'show_envido_points')
     return { newState: state, error: 'No hay envido pendiente de mostrar.' };
   if (!state.pendingShowEnvido.includes(socketId))
     return { newState: state, error: 'No tenés que mostrar.' };
@@ -779,6 +786,30 @@ function envidoChainNoQuieroValue(chain: EnvidoCallEntry[]): number {
   return chain.slice(0, -1).reduce((s, c) => s + envidoCallValue(c.type), 0);
 }
 
+function isBaseEnvidoCall(type: EnvidoCallType): type is 'envido' | 'realenvido' | 'faltaenvido' {
+  return type === 'envido' || type === 'realenvido' || type === 'faltaenvido';
+}
+
+function isValidInitialEnvidoCall(callType: EnvidoCallType): boolean {
+  return isBaseEnvidoCall(callType);
+}
+
+function isValidEnvidoRaise(chain: EnvidoCallEntry[], raise: EnvidoCallType): boolean {
+  if (!isBaseEnvidoCall(raise)) return false;
+
+  const calls = chain.map((c) => c.type);
+  const hasReal = calls.includes('realenvido');
+  const hasFalta = calls.includes('faltaenvido');
+  const envidoCount = calls.filter((t) => t === 'envido').length;
+
+  if (hasFalta) return false;
+
+  if (raise === 'faltaenvido') return true;
+  if (raise === 'realenvido') return !hasReal;
+  if (raise === 'envido') return !hasReal && envidoCount < 2;
+  return false;
+}
+
 function handleCallEnvido(
   state: TrucoGameState,
   socketId: string,
@@ -799,19 +830,16 @@ function handleCallEnvido(
     return { newState: state, error: 'El truco ya fue resuelto.' };
 
   const chain = state.envidoChain;
-  if (chain.some((call) => call.type === callType))
-    return { newState: state, error: 'Ese canto ya fue realizado en esta mano.' };
-
   // Validate sequence
   if (chain.length > 0) {
     const last = chain[chain.length - 1];
     const lastTeam = getTeamSafe(state, last.socketId);
     if (lastTeam === team)
       return { newState: state, error: 'No podés subir tu propia apuesta.' };
-    if (!isValidEnvidoRaise(last.type, callType))
+    if (!isValidEnvidoRaise(chain, callType))
       return { newState: state, error: 'Esa llamada no es válida.' };
   } else {
-    if (!['envido', 'realenvido', 'faltaenvido'].includes(callType))
+    if (!isValidInitialEnvidoCall(callType))
       return { newState: state, error: 'Llamada de envido inválida.' };
   }
 
@@ -826,14 +854,6 @@ function handleCallEnvido(
       envidoResponderTeam: opp(team),
     },
   };
-}
-
-function isValidEnvidoRaise(current: EnvidoCallType, raise: EnvidoCallType): boolean {
-  const order: EnvidoCallType[] = ['envido', 'realenvido', 'faltaenvido'];
-  const ci = order.indexOf(current);
-  const ri = order.indexOf(raise);
-  if (ci < 0 || ri < 0) return false;
-  return ri > ci; // only higher raise is valid
 }
 
 function handleRespondEnvido(

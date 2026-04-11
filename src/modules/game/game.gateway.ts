@@ -1001,13 +1001,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Handle phase transitions
     const phase = room.trucoState.phase;
 
-    if (phase === 'show_envido') {
+    if (phase === 'show_envido' || phase === 'show_envido_points') {
       // Broadcast updated state
       this.emitTrucoState(roomCode, room);
       // Start 30s timer for auto-hide
       if (room.trucoShowEnvidoTimer) clearTimeout(room.trucoShowEnvidoTimer);
       room.trucoShowEnvidoTimer = setTimeout(() => {
-        if (room.trucoState?.phase === 'show_envido') {
+        if (room.trucoState?.phase === 'show_envido' || room.trucoState?.phase === 'show_envido_points') {
           room.trucoState = timeoutShowEnvido(room.trucoState);
           this.emitTrucoState(roomCode, room);
           this.scheduleTrucoNextHand(roomCode, room);
