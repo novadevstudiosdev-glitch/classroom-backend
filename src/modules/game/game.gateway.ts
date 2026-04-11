@@ -933,7 +933,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       const modeCount: Record<string, number> = { '1v1': 2, '2v2': 4, '3v3': 6 };
       const required = modeCount[room.trucoConfig.mode] ?? 2;
-      if (room.players.size < 1) {
+      if (room.players.size !== required) {
         room.status = 'waiting';
         client.emit('error', {
           message: `Se necesitan exactamente ${required} jugadores para el modo ${room.trucoConfig.mode}.`
