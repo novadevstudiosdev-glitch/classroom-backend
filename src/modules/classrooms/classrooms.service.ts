@@ -79,8 +79,16 @@ export class ClassroomsService {
   // LISTAR CLASES DEL DOCENTE
   // ─────────────────────────────────────────────────
 
-  async findAllByTeacher(teacherUserId: string, archived: boolean = false) {
+  async findAllByTeacher(teacherUserId: string, archived: boolean = false, status?: string) {
     const teacher = await this.teachersService.getProfileOrFail(teacherUserId);
+
+    const params: any[] = [teacher.id, archived];
+    let statusClause = '';
+
+    if (status && ['active', 'pending', 'finished'].includes(status)) {
+      params.push(status);
+      statusClause = `AND c.status = $${params.length}`;
+    }
 
     const rows = await this.dataSource.query(
       `SELECT
@@ -90,9 +98,10 @@ export class ClassroomsService {
        LEFT JOIN classroom_students cs ON cs.classroom_id = c.id
        WHERE c.teacher_id = $1
          AND c.is_archived = $2
+         ${statusClause}
        GROUP BY c.id
        ORDER BY c.created_at DESC`,
-      [teacher.id, archived],
+      params,
     );
 
     return rows;
@@ -459,6 +468,166 @@ export class ClassroomsService {
       completions,
       top_students,
     };
+  }
+
+  // ─────────────────────────────────────────────────
+  // LISTA DE ALUMNOS CON ESTADÍSTICAS
+  // ─────────────────────────────────────────────────
+
+  async getStudentList(classroomId: string, teacherUserId: string) {
+    const classroom = await this.classroomRepo.findOne({ where: { id: classroomId } });
+    if (!classroom) throw new NotFoundException('Clase no encontrada.');
+    await this.assertOwnership(classroom, teacherUserId);
+
+    // Total de lecciones asignadas a la clase
+    const [{ total_lessons }] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total_lessons
+       FROM lesson_assignments la
+       JOIN lessons l ON l.id::text = la.lesson_id::text
+       WHERE la.classroom_id::text = $1 AND l.deleted_at IS NULL`,
+      [classroomId],
+    );
+
+    const students = await this.dataSource.query(
+      `SELECT
+         sp.id::text                                           AS student_id,
+         sp.alias,
+         sp.avatar_id,
+         sp.level,
+         sp.xp_total,
+         cs.joined_at,
+         cs.last_activity,
+
+         -- % general: promedio de score_pct en lecciones de esta clase
+         ROUND(COALESCE(AVG(lp.score_pct), 0)::numeric, 1)::float AS avg_score_pct,
+
+         -- Participación: lecciones con al menos 10% de progreso / total lecciones
+         COUNT(CASE WHEN lp.score_pct >= 10 THEN 1 END)::int AS participated_lessons,
+
+         -- Ausencias: lecciones asignadas donde el alumno tiene < 10% o no empezó
+         ($2 - COUNT(CASE WHEN lp.score_pct >= 10 THEN 1 END))::int AS absent_lessons,
+
+         -- Tareas pendientes: lecciones asignadas sin completar
+         COUNT(CASE WHEN lp.status IS NULL OR lp.status != 'completed' THEN 1 END)::int AS pending_tasks
+
+       FROM classroom_students cs
+       JOIN student_profiles sp ON sp.id::text = cs.student_id::text
+       LEFT JOIN lesson_assignments la ON la.classroom_id::text = $1
+       LEFT JOIN lessons l ON l.id::text = la.lesson_id::text AND l.deleted_at IS NULL
+       LEFT JOIN lesson_progress lp
+         ON lp.student_id::text = sp.id::text
+         AND lp.lesson_id::text = la.lesson_id::text
+         AND lp.deleted_at IS NULL
+       WHERE cs.classroom_id::text = $1
+       GROUP BY sp.id, sp.alias, sp.avatar_id, sp.level, sp.xp_total, cs.joined_at, cs.last_activity
+       ORDER BY sp.alias ASC`,
+      [classroomId, total_lessons],
+    );
+
+    return students.map((s: any) => ({
+      ...s,
+      total_lessons,
+      participation_pct: total_lessons > 0 ? Math.round((s.participated_lessons / total_lessons) * 100) : 0,
+      absence_pct: total_lessons > 0 ? Math.round((s.absent_lessons / total_lessons) * 100) : 0,
+      low_participation: total_lessons > 0 && (s.participated_lessons / total_lessons) * 100 < 50,
+    }));
+  }
+
+  // ─────────────────────────────────────────────────
+  // DETALLE DEL ALUMNO EN UNA CLASE (para el docente)
+  // ─────────────────────────────────────────────────
+
+  async getStudentDetail(classroomId: string, studentId: string, teacherUserId: string) {
+    const classroom = await this.classroomRepo.findOne({ where: { id: classroomId } });
+    if (!classroom) throw new NotFoundException('Clase no encontrada.');
+    await this.assertOwnership(classroom, teacherUserId);
+
+    const student = await this.studentProfileRepo.findOne({ where: { id: studentId } });
+    if (!student) throw new NotFoundException('Alumno no encontrado.');
+
+    // Verificar que el alumno pertenece a la clase
+    const enrollment = await this.classroomStudentRepo.findOne({
+      where: { classroom_id: classroomId, student_id: studentId },
+    });
+    if (!enrollment) throw new NotFoundException('El alumno no pertenece a esta clase.');
+
+    // Progreso por lección
+    const lessonStats = await this.dataSource.query(
+      `SELECT
+         l.id::text          AS lesson_id,
+         l.title             AS lesson_title,
+         la.due_date,
+         la.is_closed,
+         COALESCE(lp.status, 'not_started')      AS status,
+         COALESCE(lp.score_pct, 0)::float        AS score_pct,
+         COALESCE(lp.stars, 0)::int              AS stars,
+         COALESCE(lp.xp_earned, 0)::int          AS xp_earned,
+         lp.completed_at,
+         lp.started_at,
+         -- Ausente si score_pct < 10 o no empezó
+         (COALESCE(lp.score_pct, 0) < 10)        AS is_absent,
+         -- Atrasado si due_date vencida y no completada
+         (la.due_date IS NOT NULL AND la.due_date < NOW() AND COALESCE(lp.status, '') != 'completed') AS is_behind
+       FROM lesson_assignments la
+       JOIN lessons l ON l.id::text = la.lesson_id::text AND l.deleted_at IS NULL
+       LEFT JOIN lesson_progress lp
+         ON lp.lesson_id::text = la.lesson_id::text
+         AND lp.student_id::text = $2
+         AND lp.deleted_at IS NULL
+       WHERE la.classroom_id::text = $1
+       ORDER BY la.assigned_at ASC`,
+      [classroomId, studentId],
+    );
+
+    const totalLessons = lessonStats.length;
+    const completedLessons = lessonStats.filter((l: any) => l.status === 'completed').length;
+    const participatedLessons = lessonStats.filter((l: any) => l.score_pct >= 10).length;
+    const avgScorePct = totalLessons > 0
+      ? Math.round(lessonStats.reduce((acc: number, l: any) => acc + Number(l.score_pct), 0) / totalLessons * 10) / 10
+      : 0;
+
+    return {
+      student_id: student.id,
+      alias: student.alias,
+      avatar_id: student.avatar_id,
+      level: student.level,
+      xp_total: student.xp_total,
+      joined_at: enrollment.joined_at,
+      last_activity: enrollment.last_activity,
+      summary: {
+        total_lessons: totalLessons,
+        completed_lessons: completedLessons,
+        participation_pct: totalLessons > 0 ? Math.round((participatedLessons / totalLessons) * 100) : 0,
+        absence_pct: totalLessons > 0 ? Math.round(((totalLessons - participatedLessons) / totalLessons) * 100) : 0,
+        avg_score_pct: avgScorePct,
+        pending_tasks: lessonStats.filter((l: any) => l.status !== 'completed').length,
+        low_participation: totalLessons > 0 && (participatedLessons / totalLessons) * 100 < 50,
+      },
+      lessons: lessonStats,
+    };
+  }
+
+  // ─────────────────────────────────────────────────
+  // EDITAR ALIAS DEL ALUMNO (desde el docente)
+  // ─────────────────────────────────────────────────
+
+  async updateStudentAlias(classroomId: string, studentId: string, alias: string, teacherUserId: string) {
+    const classroom = await this.classroomRepo.findOne({ where: { id: classroomId } });
+    if (!classroom) throw new NotFoundException('Clase no encontrada.');
+    await this.assertOwnership(classroom, teacherUserId);
+
+    const enrollment = await this.classroomStudentRepo.findOne({
+      where: { classroom_id: classroomId, student_id: studentId },
+    });
+    if (!enrollment) throw new NotFoundException('El alumno no pertenece a esta clase.');
+
+    const student = await this.studentProfileRepo.findOne({ where: { id: studentId } });
+    if (!student) throw new NotFoundException('Alumno no encontrado.');
+
+    student.alias = alias;
+    await this.studentProfileRepo.save(student);
+
+    return { student_id: studentId, alias: student.alias };
   }
 
   // ─────────────────────────────────────────────────

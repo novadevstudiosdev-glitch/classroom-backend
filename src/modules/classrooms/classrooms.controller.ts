@@ -2,6 +2,8 @@ import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Pa
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { IsString, MinLength, MaxLength } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
 
 import { ClassroomsService } from './classrooms.service';
 import { CreateClassroomDto } from './dto/create-classroom.dto';
@@ -10,6 +12,14 @@ import { JoinClassroomDto } from './dto/join-classroom.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+
+class UpdateStudentAliasDto {
+  @ApiProperty({ example: 'Juan Pérez' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(30)
+  alias: string;
+}
 
 @ApiTags('Classrooms')
 @ApiBearerAuth()
@@ -36,14 +46,10 @@ export class ClassroomsController {
   @ApiOperation({ summary: 'Listar todas las clases del docente' })
   @ApiResponse({ status: 200, description: 'Array de clases del docente con cantidad de alumnos.' })
   @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
-  @ApiQuery({
-    name: 'archived',
-    required: false,
-    type: Boolean,
-    description: 'Si es true, devuelve las clases archivadas',
-  })
-  findAll(@CurrentUser() user: any, @Query('archived') archived?: string) {
-    return this.classroomsService.findAllByTeacher(user.sub, archived === 'true');
+  @ApiQuery({ name: 'archived', required: false, type: Boolean, description: 'Si es true, devuelve las clases archivadas' })
+  @ApiQuery({ name: 'status', required: false, enum: ['active', 'pending', 'finished'], description: 'Filtrar por estado de la clase' })
+  findAll(@CurrentUser() user: any, @Query('archived') archived?: string, @Query('status') status?: string) {
+    return this.classroomsService.findAllByTeacher(user.sub, archived === 'true', status);
   }
 
   @Get('my-classes')
@@ -197,5 +203,68 @@ export class ClassroomsController {
   @ApiResponse({ status: 404, description: 'Clase no encontrada.' })
   getProgress(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
     return this.classroomsService.getProgress(id, user.sub);
+  }
+
+  // ─────────────────────────────────────────────────
+  // LISTA DE ALUMNOS CON ESTADÍSTICAS
+  // ─────────────────────────────────────────────────
+
+  @Get(':id/students/list')
+  @Roles('teacher')
+  @ApiOperation({
+    summary: 'Lista de alumnos con estadísticas de rendimiento',
+    description: 'Por cada alumno: % general, % ausencias, participación, tareas pendientes. Marca con low_participation=true a los que tienen < 50% de participación.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID de la clase' })
+  @ApiResponse({ status: 200, description: 'Array de alumnos con stats.' })
+  @ApiResponse({ status: 403, description: 'No tenés permiso sobre esta clase.' })
+  @ApiResponse({ status: 404, description: 'Clase no encontrada.' })
+  getStudentList(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
+    return this.classroomsService.getStudentList(id, user.sub);
+  }
+
+  // ─────────────────────────────────────────────────
+  // DETALLE DEL ALUMNO (stats + notas por mes)
+  // ─────────────────────────────────────────────────
+
+  @Get(':id/students/:studentId')
+  @Roles('teacher')
+  @ApiOperation({
+    summary: 'Detalle del alumno en la clase',
+    description: 'Participación, % por lección, % general, ausencias y tareas pendientes. Las notas del docente se consultan en GET /teachers/me/students/:studentId/notes.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID de la clase' })
+  @ApiParam({ name: 'studentId', description: 'UUID del perfil del alumno' })
+  @ApiResponse({ status: 200, description: 'Detalle del alumno con stats por lección.' })
+  @ApiResponse({ status: 403, description: 'No tenés permiso sobre esta clase.' })
+  @ApiResponse({ status: 404, description: 'Clase o alumno no encontrado.' })
+  getStudentDetail(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.classroomsService.getStudentDetail(id, studentId, user.sub);
+  }
+
+  // ─────────────────────────────────────────────────
+  // EDITAR ALIAS DEL ALUMNO
+  // ─────────────────────────────────────────────────
+
+  @Patch(':id/students/:studentId')
+  @Roles('teacher')
+  @ApiOperation({ summary: 'Editar alias del alumno dentro de la clase' })
+  @ApiParam({ name: 'id', description: 'UUID de la clase' })
+  @ApiParam({ name: 'studentId', description: 'UUID del perfil del alumno' })
+  @ApiResponse({ status: 200, description: 'Alias actualizado.' })
+  @ApiResponse({ status: 400, description: 'Alias inválido.' })
+  @ApiResponse({ status: 403, description: 'No tenés permiso sobre esta clase.' })
+  @ApiResponse({ status: 404, description: 'Clase o alumno no encontrado.' })
+  updateStudentAlias(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @CurrentUser() user: any,
+    @Body() dto: UpdateStudentAliasDto,
+  ) {
+    return this.classroomsService.updateStudentAlias(id, studentId, dto.alias, user.sub);
   }
 }

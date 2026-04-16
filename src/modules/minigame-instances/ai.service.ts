@@ -4,18 +4,22 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MinigameInstance } from './entities/minigame-instance.entity';
 
-export type GenerateGameType = 'quiz' | 'wordsearch' | 'preguntados';
+export type GenerateGameType = 'quiz' | 'wordsearch' | 'anagram' | 'preguntados';
 
 export interface GenerateGameDto {
   type: GenerateGameType;
   topic: string;          // e.g. "Historia Argentina"
-  language?: string;      // default 'es'
+  language?: string;      // default 'e/s'
   count?: number;         // questions for quiz, words for wordsearch
   categories?: string[];  // optional fixed category names for preguntados classic mode
 }
 
-const DEFAULT_TEACHER_ID = '2fdabcfd-d297-4e48-ac96-de8a85d151f1';
-const DEFAULT_MINIGAME_ID = 'b87ccbc2-9de1-4a61-bd62-9afbddf221ce';
+const MAX_TOPIC_LENGTH = 120;
+const MIN_COUNT = 2;
+const MAX_COUNT = 25;
+
+// IDs configured via env so they're not hardcoded in source
+// See GAME_DEFAULT_TEACHER_ID / GAME_DEFAULT_MINIGAME_ID in .env
 
 @Injectable()
 export class AIService {
@@ -27,14 +31,23 @@ export class AIService {
 
   async generateGame(dto: GenerateGameDto): Promise<Record<string, any>> {
     const apiKey = this.config.get<string>('GROQ_API_KEY');
-    if (!apiKey) throw new BadRequestException('GROQ_API_KEY no configurada.');
+    if (!apiKey) throw new BadRequestException('Servicio de IA no disponible.');
 
+    // Validate inputs
+    const topic = (dto.topic ?? '').trim();
+    if (!topic) throw new BadRequestException('La temática no puede estar vacía.');
+    if (topic.length > MAX_TOPIC_LENGTH)
+      throw new BadRequestException(`La temática no puede superar ${MAX_TOPIC_LENGTH} caracteres.`);
+    const count = Math.min(MAX_COUNT, Math.max(MIN_COUNT, Number(dto.count) || 8));
     const lang = dto.language ?? 'es';
+
     const prompt = dto.type === 'quiz'
-      ? this.buildQuizPrompt(dto.topic, dto.count ?? 10, lang)
+      ? this.buildQuizPrompt(topic, count, lang)
       : dto.type === 'preguntados'
-      ? this.buildPreguntadosPrompt(dto.topic, dto.count ?? 3, lang, dto.categories)
-      : this.buildWordsearchPrompt(dto.topic, dto.count ?? 10, lang);
+      ? this.buildPreguntadosPrompt(topic, count, lang, dto.categories)
+      : dto.type === 'anagram'
+      ? this.buildAnagramPrompt(topic, count, lang)
+      : this.buildWordsearchPrompt(topic, count, lang);
 
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -51,14 +64,14 @@ export class AIService {
     });
 
     if (!res.ok) {
-      const err = await res.text();
-      throw new BadRequestException(`Error de IA: ${err}`);
+      await res.text(); // consume body, don't expose internal API details
+      throw new BadRequestException('El servicio de IA no pudo generar el contenido. Intentá de nuevo.');
     }
 
     const data = await res.json() as any;
     const text: string = data?.choices?.[0]?.message?.content ?? '';
 
-    return this.parseResponse(text, dto.type, dto.topic);
+    return this.parseResponse(text, dto.type, topic);
   }
 
   // ── Prompts ────────────────────────────────────────────────────────────────
@@ -99,10 +112,28 @@ Devolvé SOLO un JSON válido con esta estructura exacta, sin texto adicional, s
 
 Reglas:
 - Generá exactamente ${count} palabras relacionadas con el tema
-- Todas en MAYÚSCULAS, sin espacios ni acentos ni caracteres especiales
+- Todas en MAYÚSCULAS, sin espacios
+- Usá letras del español (se permiten Ñ, Á, É, Í, Ó, Ú)
 - Longitud entre 4 y 12 letras por palabra
 - Palabras variadas y representativas del tema
 - No uses markdown ni bloques de código en tu respuesta`;
+  }
+
+  private buildAnagramPrompt(topic: string, count: number, lang: string): string {
+    return `GenerÃ¡ una lista de palabras para un juego de anagramas sobre "${topic}" en idioma ${lang === 'es' ? 'espaÃ±ol' : lang}.
+
+DevolvÃ© SOLO un JSON vÃ¡lido con esta estructura exacta, sin texto adicional, sin bloques de cÃ³digo:
+{
+  "title": "TÃ­tulo atractivo del juego de anagramas",
+  "words": ["PALABRA1", "PALABRA2", "PALABRA3"]
+}
+
+Reglas:
+- GenerÃ¡ exactamente ${count} palabras relacionadas con el tema
+- Todas en MAYÃšSCULAS, sin espacios
+- UsÃ¡ letras del espaÃ±ol (se permiten Ã‘, Ã, Ã‰, Ã, Ã“, Ãš)
+- Longitud entre 4 y 10 letras por palabra (para que sea jugable)
+- No uses markdown ni bloques de cÃ³digo en tu respuesta`;
   }
 
   private buildPreguntadosPrompt(topic: string, questionsPerCat: number, lang: string, fixedCategories?: string[]): string {
@@ -217,9 +248,16 @@ ${catRule}
       };
     } else {
       const words: string[] = (parsed.words ?? []).map((w: string) =>
-        w.toUpperCase().replace(/[^A-Z]/g, ''),
+        w.toUpperCase().replace(/[^A-ZÁÉÍÓÚÑÜ]/g, ''),
       ).filter((w: string) => w.length >= 3);
       if (!words.length) throw new BadRequestException('La IA no generó palabras. Intentá de nuevo.');
+      if (type === 'anagram') {
+        return {
+          type: 'anagram',
+          title: parsed.title ?? `Anagrama: ${topic}`,
+          words,
+        };
+      }
       return {
         type: 'wordsearch',
         title: parsed.title ?? `Sopa de letras: ${topic}`,
@@ -234,14 +272,44 @@ ${catRule}
   }
 
   async saveGeneratedGame(title: string, topic: string, content_json: any): Promise<MinigameInstance> {
+    const teacherId = this.config.get<string>('GAME_DEFAULT_TEACHER_ID');
+    const minigameId = this.config.get<string>('GAME_DEFAULT_MINIGAME_ID');
+    if (!teacherId || !minigameId)
+      throw new BadRequestException('Configuración de juegos de IA incompleta en el servidor.');
+
+    // Basic content size guard (~500 KB)
+    const contentStr = JSON.stringify(content_json);
+    if (contentStr.length > 500_000)
+      throw new BadRequestException('El contenido del juego es demasiado grande.');
+
+    const safeTitle = String(title ?? '').trim().slice(0, 120) || 'Juego IA';
+    const safeTopic = String(topic ?? '').trim().slice(0, 120);
+
+    // Derive game_type and question_count from content_json
+    const gameType: string = content_json?.type ?? 'quiz';
+    let questionCount = 0;
+    if (gameType === 'quiz') {
+      questionCount = Array.isArray(content_json?.questions) ? content_json.questions.length : 0;
+    } else if (gameType === 'wordsearch') {
+      questionCount = Array.isArray(content_json?.words) ? content_json.words.length : 0;
+    } else if (gameType === 'anagram') {
+      questionCount = Array.isArray(content_json?.words) ? content_json.words.length : 0;
+    } else if (gameType === 'preguntados') {
+      const cats = Array.isArray(content_json?.categories) ? content_json.categories : [];
+      questionCount = cats.reduce((acc: number, c: any) =>
+        acc + (Array.isArray(c.questions) ? c.questions.length : 0), 0);
+    }
+
     const instance = this.instanceRepo.create({
-      teacher_id: DEFAULT_TEACHER_ID,
-      minigame_id: DEFAULT_MINIGAME_ID,
-      title,
-      description: `Generado con IA · Temática: ${topic}`,
+      teacher_id: teacherId,
+      minigame_id: minigameId,
+      title: safeTitle,
+      description: `Generado con IA · Temática: ${safeTopic}`,
       content_json,
       config_json: {},
       is_public: true,
+      game_type: gameType,
+      question_count: questionCount,
     });
     return this.instanceRepo.save(instance);
   }

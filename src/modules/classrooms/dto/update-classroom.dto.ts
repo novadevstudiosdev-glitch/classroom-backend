@@ -2,6 +2,8 @@ import { IsString, IsOptional, IsBoolean, MinLength, MaxLength, IsIn } from 'cla
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { GRADE_LEVELS } from './create-classroom.dto';
 
+export const CLASSROOM_STATUSES = ['active', 'pending', 'finished'] as const;
+
 export class UpdateClassroomDto {
   @ApiPropertyOptional({ example: '3° Grado B' })
   @IsOptional()
@@ -25,4 +27,9 @@ export class UpdateClassroomDto {
   @IsOptional()
   @IsBoolean()
   is_archived?: boolean;
+
+  @ApiPropertyOptional({ enum: CLASSROOM_STATUSES, example: 'active', description: 'Estado de la clase: active (en curso), pending (no iniciada), finished (ciclo cerrado)' })
+  @IsOptional()
+  @IsIn(CLASSROOM_STATUSES)
+  status?: 'active' | 'pending' | 'finished';
 }

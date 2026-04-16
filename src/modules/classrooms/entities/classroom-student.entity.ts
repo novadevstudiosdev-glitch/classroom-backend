@@ -1,9 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Unique, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Unique, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { Classroom } from './classroom.entity';
 import { StudentProfile } from '../../students/entities/student-profile.entity';
 
 @Entity('classroom_students')
 @Unique(['classroom_id', 'student_id'])
+@Index(['student_id'])
+@Index(['classroom_id'])
 export class ClassroomStudent {
   @PrimaryGeneratedColumn('uuid')
   id: string;

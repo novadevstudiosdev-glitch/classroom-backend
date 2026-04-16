@@ -18,6 +18,8 @@ export class ParentsController {
   @Patch('me/profile')
   @ApiOperation({ summary: 'Actualizar perfil del padre/tutor' })
   @ApiResponse({ status: 200, description: 'Perfil actualizado.' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
   updateProfile(@CurrentUser() user: any, @Body() dto: UpdateParentProfileDto) {
     return this.parentsService.updateProfile(user.sub, dto);
   }
@@ -33,6 +35,7 @@ export class ParentsController {
   @Get('me/children')
   @ApiOperation({ summary: 'Ver hijos vinculados y confirmados con su progreso' })
   @ApiResponse({ status: 200, description: 'Lista de hijos con XP, nivel y clases activas.' })
+  @ApiResponse({ status: 401, description: 'Token inválido o no enviado.' })
   getChildren(@CurrentUser() user: any) {
     return this.parentsService.getChildren(user.sub);
   }
