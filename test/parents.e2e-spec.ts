@@ -6,6 +6,7 @@ import { createTestApp, cleanupUsers, getVerificationToken } from './helpers/cre
 const TS = Date.now();
 const STUDENT_EMAIL = `e2e.student.parents.${TS}@test.com`;
 const PARENT_EMAIL = `e2e.parent.parents.${TS}@test.com`;
+const PARENT_EMAIL_NO_CHILD = `e2e.parent.nochild.${TS}@test.com`;
 const PASSWORD = 'Test1234!';
 
 describe('Parents (e2e)', () => {
@@ -62,7 +63,7 @@ describe('Parents (e2e)', () => {
   });
 
   afterAll(async () => {
-    await cleanupUsers(app, [STUDENT_EMAIL, PARENT_EMAIL]);
+    await cleanupUsers(app, [STUDENT_EMAIL, PARENT_EMAIL, PARENT_EMAIL_NO_CHILD]);
     await app.close();
   });
 
@@ -99,6 +100,19 @@ describe('Parents (e2e)', () => {
         recaptcha_token: 'test-token',
       })
       .expect(409);
+  });
+
+  it('POST /auth/register/parent → 201 sin alumno (vinculacion posterior)', async () => {
+    await request(app.getHttpServer())
+      .post('/api/auth/register/parent')
+      .send({
+        first_name: 'Padre',
+        last_name: 'SinHijo',
+        email: PARENT_EMAIL_NO_CHILD,
+        password: PASSWORD,
+        recaptcha_token: 'test-token',
+      })
+      .expect(201);
   });
 
   it('POST /auth/register/parent → 404 si el alumno no existe', async () => {
