@@ -1,5 +1,5 @@
-import { IsEmail, IsString, MinLength, MaxLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsEmail, IsOptional, IsString, MinLength, MaxLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterParentDto {
   @ApiProperty({ example: 'Martín' })
@@ -24,9 +24,10 @@ export class RegisterParentDto {
   @MaxLength(64)
   password: string;
 
-  @ApiProperty({ example: 'sofia@email.com', description: 'Email del alumno a vincular' })
+  @ApiPropertyOptional({ example: 'sofia@email.com', description: 'Email del alumno a vincular. Opcional; se puede vincular luego desde el dashboard.' })
+  @IsOptional()
   @IsEmail()
-  student_email: string;
+  student_email?: string;
 
   @ApiProperty({ example: 'TOKEN_DE_RECAPTCHA' })
   @IsString()

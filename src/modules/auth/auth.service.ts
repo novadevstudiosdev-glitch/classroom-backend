@@ -161,34 +161,38 @@ export class AuthService {
   }
 
   async registerParent(dto: RegisterParentDto) {
-    const studentUser = await this.userRepo.findOne({
-      where: { email: dto.student_email, role: 'student' },
-    });
+    const parentEmail = dto.email.trim().toLowerCase();
+    const studentEmail = dto.student_email?.trim().toLowerCase();
 
-    if (!studentUser) {
-      throw new NotFoundException('No se encontró un alumno con ese email.');
-    }
-
-    const studentProfile = await this.studentRepo.findOne({
-      where: { user_id: studentUser.id },
-    });
-
-    if (!studentProfile) {
-      throw new NotFoundException('No se encontró un alumno con ese email.');
-    }
-
-    await this.checkEmailAvailable(dto.email);
+    await this.checkEmailAvailable(parentEmail);
 
     const password_hash = await bcrypt.hash(dto.password, 12);
     const { token: verification_token, expires } = this.buildVerificationToken(24);
 
-    const confirmation_token = randomBytes(32).toString('hex');
-    const confirmationExpires = new Date();
-    confirmationExpires.setHours(confirmationExpires.getHours() + 48);
+    let studentUser: User | null = null;
+    let studentProfile: StudentProfile | null = null;
+
+    if (studentEmail) {
+      studentUser = await this.userRepo.findOne({
+        where: { email: studentEmail, role: 'student' },
+      });
+
+      if (!studentUser) {
+        throw new NotFoundException('No se encontro un alumno con ese email.');
+      }
+
+      studentProfile = await this.studentRepo.findOne({
+        where: { user_id: studentUser.id },
+      });
+
+      if (!studentProfile) {
+        throw new NotFoundException('No se encontro un alumno con ese email.');
+      }
+    }
 
     const { userId, profileId } = await this.dataSource.transaction(async (manager) => {
       const user = manager.create(User, {
-        email: dto.email,
+        email: parentEmail,
         password_hash,
         role: 'parent',
         is_verified: false,
@@ -204,36 +208,41 @@ export class AuthService {
       });
       await manager.save(profile);
 
-      const link = manager.create(ParentStudent, {
-        parent_id: profile.id,
-        student_id: studentProfile.id,
-        status: 'pending',
-      });
-      await manager.save(link);
+      if (studentProfile) {
+        const link = manager.create(ParentStudent, {
+          parent_id: profile.id,
+          student_id: studentProfile.id,
+          status: 'pending',
+        });
+        await manager.save(link);
+      }
 
       return { userId: user.id, profileId: profile.id };
     });
 
-    await this.emailService.sendVerificationEmail(dto.email, verification_token);
-    await this.emailService.sendParentLinkConfirmation(
-      studentUser.email,
-      `${dto.first_name} ${dto.last_name}`,
-      studentProfile.alias,
-      confirmation_token,
-    );
+    await this.emailService.sendVerificationEmail(parentEmail, verification_token);
 
-    this.logger.log(`Padre registrado: ${dto.email} → alumno: ${dto.student_email}`);
+    if (studentUser && studentProfile) {
+      const confirmation_token = randomBytes(32).toString('hex');
+      await this.emailService.sendParentLinkConfirmation(
+        studentUser.email,
+        `${dto.first_name} ${dto.last_name}`,
+        studentProfile.alias,
+        confirmation_token,
+      );
+      this.logger.log(`Padre registrado: ${parentEmail} -> alumno: ${studentEmail}`);
+    } else {
+      this.logger.log(`Padre registrado: ${parentEmail} (sin alumno vinculado)`);
+    }
 
     return {
-      message: 'Cuenta creada. Verifica tu email y confirma la vinculacion con tu hijo.',
+      message: studentProfile
+        ? 'Cuenta creada. Verifica tu email y confirma la vinculacion con tu hijo.'
+        : 'Cuenta creada. Verifica tu email y luego vincula a tu hijo desde tu cuenta.',
       user_id: userId,
       profile_id: profileId,
     };
   }
-
-  // ─────────────────────────────────────────────────
-  // LOGIN
-  // ─────────────────────────────────────────────────
 
   async login(dto: LoginDto) {
     const user = await this.userRepo.findOne({
