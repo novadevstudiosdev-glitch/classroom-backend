@@ -83,6 +83,12 @@ function translateTrucoAction(state: TrucoGameState, socketId: string, raw: any)
       if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'noquiero' };
       if (state.trucoStatus === 'pending')  return { type: 'respond-truco',  response: 'noquiero' };
       return { type: 'respond-envido', response: 'noquiero' }; // fallback
+    case 'son-buenas':
+      if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'sonbuenas' };
+      return { type: 'respond-envido', response: 'sonbuenas' }; // fallback
+    case 'decir-puntos':
+      if (state.envidoStatus === 'pending') return { type: 'respond-envido', response: 'decirpuntos' };
+      return { type: 'respond-envido', response: 'decirpuntos' }; // fallback
 
     /* ── Flor ── */
     case 'flor':              return { type: 'declare-flor' };
@@ -927,7 +933,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       const modeCount: Record<string, number> = { '1v1': 2, '2v2': 4, '3v3': 6 };
       const required = modeCount[room.trucoConfig.mode] ?? 2;
-      if (room.players.size < 1) {
+      if (room.players.size !== required) {
         room.status = 'waiting';
         client.emit('error', {
           message: `Se necesitan exactamente ${required} jugadores para el modo ${room.trucoConfig.mode}.`
@@ -995,13 +1001,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Handle phase transitions
     const phase = room.trucoState.phase;
 
-    if (phase === 'show_envido') {
+    if (phase === 'show_envido' || phase === 'show_envido_points') {
       // Broadcast updated state
       this.emitTrucoState(roomCode, room);
       // Start 30s timer for auto-hide
       if (room.trucoShowEnvidoTimer) clearTimeout(room.trucoShowEnvidoTimer);
       room.trucoShowEnvidoTimer = setTimeout(() => {
-        if (room.trucoState?.phase === 'show_envido') {
+        if (room.trucoState?.phase === 'show_envido' || room.trucoState?.phase === 'show_envido_points') {
           room.trucoState = timeoutShowEnvido(room.trucoState);
           this.emitTrucoState(roomCode, room);
           this.scheduleTrucoNextHand(roomCode, room);
