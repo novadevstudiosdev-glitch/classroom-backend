@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { JwtService } from '@nestjs/jwt';
 import { createTestApp, cleanupUsers, getVerificationToken } from './helpers/create-app';
 
 const TS = Date.now();
@@ -8,6 +9,7 @@ const STUDENT_EMAIL = `e2e.student.parents.${TS}@test.com`;
 const PARENT_EMAIL = `e2e.parent.parents.${TS}@test.com`;
 const PARENT_EMAIL_NO_CHILD = `e2e.parent.nochild.${TS}@test.com`;
 const PARENT_EMAIL_UNKNOWN_CHILD = `e2e.parent.unknownchild.${TS}@test.com`;
+const PARENT_EMAIL_CONFIRM_LINK = `e2e.parent.confirmlink.${TS}@test.com`;
 const PASSWORD = 'Test1234!';
 
 describe('Parents (e2e)', () => {
@@ -69,6 +71,7 @@ describe('Parents (e2e)', () => {
       PARENT_EMAIL,
       PARENT_EMAIL_NO_CHILD,
       PARENT_EMAIL_UNKNOWN_CHILD,
+      PARENT_EMAIL_CONFIRM_LINK,
     ]);
     if (app) await app.close();
   });
@@ -135,6 +138,54 @@ describe('Parents (e2e)', () => {
       .expect(201);
 
     expect(res.body.data.message).toContain('podras vincularlo luego');
+  });
+
+  it('POST /auth/confirm-parent-link → 400 con token inválido', async () => {
+    await request(app.getHttpServer())
+      .post('/api/auth/confirm-parent-link')
+      .send({ token: 'token-invalido' })
+      .expect(400);
+  });
+
+  it('POST /auth/confirm-parent-link → 200 confirma vinculación pendiente', async () => {
+    await request(app.getHttpServer())
+      .post('/api/auth/register/parent')
+      .send({
+        first_name: 'Padre',
+        last_name: 'ConfirmLink',
+        email: PARENT_EMAIL_CONFIRM_LINK,
+        password: PASSWORD,
+        student_email: STUDENT_EMAIL,
+        recaptcha_token: 'test-token',
+      })
+      .expect(201);
+
+    const ds = app.get(DataSource);
+    const jwt = app.get(JwtService);
+
+    const rows = await ds.query(
+      `SELECT ps.id::text as id
+       FROM parent_students ps
+       JOIN parent_profiles pp ON pp.id::text = ps.parent_id::text
+       JOIN users u ON u.id::text = pp.user_id::text
+       WHERE u.email = $1
+       LIMIT 1`,
+      [PARENT_EMAIL_CONFIRM_LINK],
+    );
+
+    expect(rows.length).toBeGreaterThan(0);
+
+    const token = await jwt.signAsync(
+      { type: 'parent_link', link_id: rows[0].id },
+      { expiresIn: '1h' },
+    );
+
+    const confirmRes = await request(app.getHttpServer())
+      .post('/api/auth/confirm-parent-link')
+      .send({ token })
+      .expect(200);
+
+    expect(confirmRes.body.data.message).toContain('confirmada');
   });
 
   it('POST /auth/register/parent → 400 sin campos requeridos', async () => {

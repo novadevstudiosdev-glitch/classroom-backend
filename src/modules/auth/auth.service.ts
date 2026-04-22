@@ -192,7 +192,7 @@ export class AuthService {
       }
     }
 
-    const { userId, profileId } = await this.dataSource.transaction(async (manager) => {
+    const { userId, profileId, linkId } = await this.dataSource.transaction(async (manager) => {
       const user = manager.create(User, {
         email: parentEmail,
         password_hash,
@@ -210,6 +210,8 @@ export class AuthService {
       });
       await manager.save(profile);
 
+      let linkId: string | null = null;
+
       if (studentProfile) {
         const link = manager.create(ParentStudent, {
           parent_id: profile.id,
@@ -217,15 +219,16 @@ export class AuthService {
           status: 'pending',
         });
         await manager.save(link);
+        linkId = link.id;
       }
 
-      return { userId: user.id, profileId: profile.id };
+      return { userId: user.id, profileId: profile.id, linkId };
     });
 
     await this.emailService.sendVerificationEmail(parentEmail, verification_token);
 
-    if (studentUser && studentProfile) {
-      const confirmation_token = randomBytes(32).toString('hex');
+    if (studentUser && studentProfile && linkId) {
+      const confirmation_token = await this.buildParentLinkToken(linkId, 48);
       await this.emailService.sendParentLinkConfirmation(
         studentUser.email,
         `${dto.first_name} ${dto.last_name}`,
@@ -402,6 +405,38 @@ export class AuthService {
     return { message: '¡Email verificado! Ya podés iniciar sesión.' };
   }
 
+  async confirmParentLink(token: string) {
+    type ParentLinkTokenPayload = { type?: string; link_id?: string };
+    let payload: ParentLinkTokenPayload;
+
+    try {
+      payload = await this.jwtService.verifyAsync<ParentLinkTokenPayload>(token);
+    } catch {
+      throw new BadRequestException('Token de vinculacion invalido o expirado.');
+    }
+
+    if (payload.type !== 'parent_link' || !payload.link_id) {
+      throw new BadRequestException('Token de vinculacion invalido o expirado.');
+    }
+
+    const link = await this.parentStudentRepo.findOne({
+      where: { id: payload.link_id },
+    });
+
+    if (!link) {
+      throw new BadRequestException('Solicitud de vinculacion no encontrada.');
+    }
+
+    if (link.status === 'confirmed') {
+      return { message: 'La vinculacion ya estaba confirmada.' };
+    }
+
+    link.status = 'confirmed';
+    await this.parentStudentRepo.save(link);
+
+    return { message: 'Vinculacion confirmada correctamente.' };
+  }
+
   // ─────────────────────────────────────────────────
   // FORGOT / RESET PASSWORD
   // ─────────────────────────────────────────────────
@@ -500,6 +535,13 @@ export class AuthService {
     const expires = new Date();
     expires.setHours(expires.getHours() + hours);
     return { token, expires };
+  }
+
+  private async buildParentLinkToken(linkId: string, hours: number) {
+    return this.jwtService.signAsync(
+      { type: 'parent_link', link_id: linkId },
+      { expiresIn: `${hours}h` },
+    );
   }
 
   private async checkEmailAvailable(email: string) {
