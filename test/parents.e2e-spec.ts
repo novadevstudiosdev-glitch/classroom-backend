@@ -7,6 +7,7 @@ const TS = Date.now();
 const STUDENT_EMAIL = `e2e.student.parents.${TS}@test.com`;
 const PARENT_EMAIL = `e2e.parent.parents.${TS}@test.com`;
 const PARENT_EMAIL_NO_CHILD = `e2e.parent.nochild.${TS}@test.com`;
+const PARENT_EMAIL_UNKNOWN_CHILD = `e2e.parent.unknownchild.${TS}@test.com`;
 const PASSWORD = 'Test1234!';
 
 describe('Parents (e2e)', () => {
@@ -63,8 +64,13 @@ describe('Parents (e2e)', () => {
   });
 
   afterAll(async () => {
-    await cleanupUsers(app, [STUDENT_EMAIL, PARENT_EMAIL, PARENT_EMAIL_NO_CHILD]);
-    await app.close();
+    await cleanupUsers(app, [
+      STUDENT_EMAIL,
+      PARENT_EMAIL,
+      PARENT_EMAIL_NO_CHILD,
+      PARENT_EMAIL_UNKNOWN_CHILD,
+    ]);
+    if (app) await app.close();
   });
 
   // ─── GET PROFILE ──────────────────────────────────────────
@@ -115,18 +121,20 @@ describe('Parents (e2e)', () => {
       .expect(201);
   });
 
-  it('POST /auth/register/parent → 404 si el alumno no existe', async () => {
-    await request(app.getHttpServer())
+  it('POST /auth/register/parent → 201 si el alumno no existe (permite vincular luego)', async () => {
+    const res = await request(app.getHttpServer())
       .post('/api/auth/register/parent')
       .send({
         first_name: 'Otro',
         last_name: 'Padre',
-        email: `nuevo.padre.${TS}@test.com`,
+        email: PARENT_EMAIL_UNKNOWN_CHILD,
         password: PASSWORD,
         student_email: 'alumno-inexistente@test.com',
         recaptcha_token: 'test-token',
       })
-      .expect(404);
+      .expect(201);
+
+    expect(res.body.data.message).toContain('podras vincularlo luego');
   });
 
   it('POST /auth/register/parent → 400 sin campos requeridos', async () => {

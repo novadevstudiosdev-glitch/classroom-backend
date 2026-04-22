@@ -177,16 +177,18 @@ export class AuthService {
         where: { email: studentEmail, role: 'student' },
       });
 
-      if (!studentUser) {
-        throw new NotFoundException('No se encontro un alumno con ese email.');
+      if (studentUser) {
+        studentProfile = await this.studentRepo.findOne({
+          where: { user_id: studentUser.id },
+        });
       }
 
-      studentProfile = await this.studentRepo.findOne({
-        where: { user_id: studentUser.id },
-      });
-
-      if (!studentProfile) {
-        throw new NotFoundException('No se encontro un alumno con ese email.');
+      if (!studentUser || !studentProfile) {
+        this.logger.warn(
+          `Registro padre sin vinculacion inicial: alumno no encontrado para ${studentEmail}`,
+        );
+        studentUser = null;
+        studentProfile = null;
       }
     }
 
@@ -238,7 +240,9 @@ export class AuthService {
     return {
       message: studentProfile
         ? 'Cuenta creada. Verifica tu email y confirma la vinculacion con tu hijo.'
-        : 'Cuenta creada. Verifica tu email y luego vincula a tu hijo desde tu cuenta.',
+        : studentEmail
+          ? 'Cuenta creada. Verifica tu email. No encontramos ese alumno todavia, podras vincularlo luego desde tu cuenta.'
+          : 'Cuenta creada. Verifica tu email y luego vincula a tu hijo desde tu cuenta.',
       user_id: userId,
       profile_id: profileId,
     };
