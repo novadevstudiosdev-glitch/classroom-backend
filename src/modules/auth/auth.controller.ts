@@ -10,6 +10,7 @@ import { RegisterParentDto } from './dto/register-parent.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ConfirmParentLinkDto } from './dto/confirm-parent-link.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -148,6 +149,16 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Token inválido o expirado.' })
   async verifyEmail(@Body() { token }: VerifyEmailDto) {
     return this.authService.verifyEmail(token);
+  }
+
+  @Public()
+  @Post('confirm-parent-link')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirmar vinculacion padre-alumno con token del email' })
+  @ApiResponse({ status: 200, description: 'Vinculacion confirmada.' })
+  @ApiResponse({ status: 400, description: 'Token invalido o expirado.' })
+  async confirmParentLink(@Body() { token }: ConfirmParentLinkDto) {
+    return this.authService.confirmParentLink(token);
   }
 
   // ─────────────────────────────────────────────────
