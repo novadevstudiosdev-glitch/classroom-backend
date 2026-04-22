@@ -16,7 +16,7 @@ describe('Auth (e2e)', () => {
 
   afterAll(async () => {
     await cleanupUsers(app, [TEACHER_EMAIL]);
-    await app.close();
+    if (app) await app.close();
   });
 
   // ─── REGISTER ────────────────────────────────────────
@@ -152,3 +152,4 @@ describe('Auth (e2e)', () => {
       .expect(400);
   });
 });
+

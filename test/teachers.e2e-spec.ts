@@ -35,7 +35,7 @@ describe('Teachers (e2e)', () => {
 
   afterAll(async () => {
     await cleanupUsers(app, [TEACHER_EMAIL]);
-    await app.close();
+    if (app) await app.close();
   });
 
   // ─── GET PROFILE ──────────────────────────────────────────
@@ -93,3 +93,4 @@ describe('Teachers (e2e)', () => {
       .expect(401);
   });
 });
+
