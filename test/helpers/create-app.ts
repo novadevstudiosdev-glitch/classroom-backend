@@ -39,6 +39,7 @@ export async function createTestApp(): Promise<INestApplication> {
 }
 
 export async function cleanupUsers(app: INestApplication, emails: string[]) {
+  if (!app) return;
   if (emails.length === 0) return;
   const ds = app.get(DataSource);
 
