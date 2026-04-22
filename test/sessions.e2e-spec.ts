@@ -46,7 +46,7 @@ describe('Sessions (e2e)', () => {
   afterAll(async () => {
     if (minigameCreated) await cleanupMinigame(app, minigameId);
     await cleanupUsers(app, [STUDENT_EMAIL]);
-    await app.close();
+    if (app) await app.close();
   });
 
   // ─── START SESSION ────────────────────────────────────────
@@ -231,3 +231,4 @@ describe('Sessions (e2e)', () => {
     await cleanupUsers(app, [otherEmail]);
   });
 });
+

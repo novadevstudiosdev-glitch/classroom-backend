@@ -33,7 +33,7 @@ describe('Classrooms (e2e)', () => {
 
   afterAll(async () => {
     await cleanupUsers(app, [TEACHER_EMAIL, STUDENT_EMAIL]);
-    await app.close();
+    if (app) await app.close();
   });
 
   // ─── CREATE CLASSROOM ─────────────────────────────────
@@ -260,3 +260,4 @@ describe('Classrooms (e2e)', () => {
     expect(res.body.data.message).toBeDefined();
   });
 });
+

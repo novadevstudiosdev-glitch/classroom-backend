@@ -82,7 +82,7 @@ describe('Minigame Instances (e2e)', () => {
   afterAll(async () => {
     if (minigameCreated) await cleanupMinigame(app, minigameId);
     await cleanupUsers(app, [TEACHER_EMAIL, STUDENT_EMAIL]);
-    await app.close();
+    if (app) await app.close();
   });
 
   // ─── CREATE ───────────────────────────────────────────────
@@ -319,3 +319,4 @@ describe('Minigame Instances (e2e)', () => {
       .expect(404);
   });
 });
+

@@ -74,7 +74,7 @@ describe('Admin (e2e)', () => {
     if (createdMinigameId) await cleanupMinigame(app, createdMinigameId);
     if (minigameCreated) await cleanupMinigame(app, minigameId);
     await cleanupUsers(app, [ADMIN_EMAIL, TEACHER_EMAIL]);
-    await app.close();
+    if (app) await app.close();
   });
 
   // ─── STATS ────────────────────────────────────────────
@@ -231,3 +231,4 @@ describe('Admin (e2e)', () => {
       .expect(404);
   });
 });
+

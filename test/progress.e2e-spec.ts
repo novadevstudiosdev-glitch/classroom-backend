@@ -87,7 +87,7 @@ describe('Progress (e2e)', () => {
 
   afterAll(async () => {
     await cleanupUsers(app, [TEACHER_EMAIL, STUDENT_EMAIL]);
-    await app.close();
+    if (app) await app.close();
   });
 
   // ─── GET MY PROGRESS ──────────────────────────────────────
@@ -206,3 +206,4 @@ describe('Progress (e2e)', () => {
       .expect(403);
   });
 });
+
