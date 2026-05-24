@@ -6,6 +6,11 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { LinkChildDto } from './dto/link-child.dto';
 import { UpdateParentProfileDto } from './dto/update-parent-profile.dto';
+import { Query, ParseIntPipe } from '@nestjs/common';
+import { ApiQuery } from '@nestjs/swagger';
+import { ReportsService } from './reports.service';
+import { RegisterChildDto } from '../students/dto/register-child.dto';
+import { AuthService } from '../auth/auth.service';
 
 @ApiTags('Parents')
 @ApiBearerAuth()
@@ -13,7 +18,11 @@ import { UpdateParentProfileDto } from './dto/update-parent-profile.dto';
 @Roles('parent')
 @Controller('parents')
 export class ParentsController {
-  constructor(private readonly parentsService: ParentsService) {}
+  constructor(
+    private readonly parentsService: ParentsService,
+    private readonly reportsService: ReportsService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Patch('me/profile')
   @ApiOperation({ summary: 'Actualizar perfil del padre/tutor' })
@@ -53,6 +62,16 @@ export class ParentsController {
     return this.parentsService.linkChild(user.sub, dto);
   }
 
+  @Post('me/register-child')
+  @Roles('parent')
+  @ApiOperation({
+    summary: 'El padre registra a su hijo en una clase',
+    description: 'Crea la cuenta del alumno sin email. El access_code se muestra UNA sola vez.',
+  })
+  async registerChild(@CurrentUser() user: any, @Body() dto: RegisterChildDto) {
+    return this.authService.registerChild(user.sub, dto);
+  }
+
   @Delete('me/children/:studentId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Desvincular un hijo' })
@@ -61,5 +80,43 @@ export class ParentsController {
   @ApiResponse({ status: 404, description: 'Vínculo no encontrado.' })
   unlinkChild(@CurrentUser() user: any, @Param('studentId', ParseUUIDPipe) studentId: string) {
     return this.parentsService.unlinkChild(user.sub, studentId);
+  }
+
+  @Post('me/children/:studentId/regenerate-code')
+  @Roles('parent')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Regenerar el código de acceso del hijo' })
+  async regenerateChildCode(@CurrentUser() user: any, @Param('studentId', ParseUUIDPipe) studentId: string) {
+    return this.authService.regenerateChildCode(user.sub, studentId);
+  }
+
+  @Get('me/children/:studentId/summary')
+  @ApiOperation({ summary: 'Resumen del hijo para el dashboard del padre' })
+  @ApiParam({ name: 'studentId', description: 'UUID del StudentProfile del hijo' })
+  getChildSummary(@CurrentUser() user: any, @Param('studentId', ParseUUIDPipe) studentId: string) {
+    return this.reportsService.getChildSummary(user.sub, studentId);
+  }
+
+  @Get('me/children/:studentId/sessions')
+  @ApiOperation({ summary: 'Historial de sesiones del hijo (últimos N días)' })
+  @ApiParam({ name: 'studentId' })
+  @ApiQuery({ name: 'days', required: false, type: Number, description: 'Default: 7' })
+  getChildSessions(@CurrentUser() user: any, @Param('studentId', ParseUUIDPipe) studentId: string, @Query('days') days?: number) {
+    return this.reportsService.getChildSessions(user.sub, studentId, days ?? 7);
+  }
+
+  @Get('me/children/:studentId/lessons')
+  @ApiOperation({ summary: 'Progreso detallado por lección del hijo' })
+  @ApiParam({ name: 'studentId' })
+  getChildLessonProgress(@CurrentUser() user: any, @Param('studentId', ParseUUIDPipe) studentId: string) {
+    return this.reportsService.getChildLessonProgress(user.sub, studentId);
+  }
+
+  @Get('me/children/:studentId/weekly-xp')
+  @ApiOperation({ summary: 'XP semanal del hijo para gráfico (últimas N semanas)' })
+  @ApiParam({ name: 'studentId' })
+  @ApiQuery({ name: 'weeks', required: false, type: Number, description: 'Default: 4' })
+  getWeeklyXp(@CurrentUser() user: any, @Param('studentId', ParseUUIDPipe) studentId: string, @Query('weeks') weeks?: number) {
+    return this.reportsService.getWeeklyXp(user.sub, studentId, weeks ?? 4);
   }
 }
