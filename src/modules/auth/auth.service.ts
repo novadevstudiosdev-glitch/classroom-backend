@@ -1,10 +1,10 @@
-import { Injectable, ConflictException, UnauthorizedException, NotFoundException, BadRequestException, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable, ConflictException, UnauthorizedException, NotFoundException, BadRequestException, InternalServerErrorException, Logger, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import { randomBytes, randomUUID } from 'crypto';
+import { randomBytes, randomInt, randomUUID } from 'crypto';
 import { RedisService } from '../redis/redis.service';
 import { EmailService } from '../email/email.service';
 
@@ -20,7 +20,9 @@ import { ClassroomStudent } from '../classrooms/entities/classroom-student.entit
 import { RegisterTeacherDto } from './dto/register-teacher.dto';
 import { RegisterStudentDto } from './dto/register-student.dto';
 import { RegisterParentDto } from './dto/register-parent.dto';
+import { RegisterChildDto } from '../students/dto/register-child.dto';
 import { LoginDto } from './dto/login.dto';
+import { LoginStudentCodeDto, SwitchToChildDto } from './dto/login-student-code.dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 
 // Entities extra para vinculación padre-alumno
@@ -184,9 +186,7 @@ export class AuthService {
       }
 
       if (!studentUser || !studentProfile) {
-        this.logger.warn(
-          `Registro padre sin vinculacion inicial: alumno no encontrado para ${studentEmail}`,
-        );
+        this.logger.warn(`Registro padre sin vinculacion inicial: alumno no encontrado para ${studentEmail}`);
         studentUser = null;
         studentProfile = null;
       }
@@ -229,25 +229,83 @@ export class AuthService {
 
     if (studentUser && studentProfile && linkId) {
       const confirmation_token = await this.buildParentLinkToken(linkId, 48);
-      await this.emailService.sendParentLinkConfirmation(
-        studentUser.email,
-        `${dto.first_name} ${dto.last_name}`,
-        studentProfile.alias,
-        confirmation_token,
-      );
+      await this.emailService.sendParentLinkConfirmation(studentUser.email, `${dto.first_name} ${dto.last_name}`, studentProfile.alias, confirmation_token);
       this.logger.log(`Padre registrado: ${parentEmail} -> alumno: ${studentEmail}`);
     } else {
       this.logger.log(`Padre registrado: ${parentEmail} (sin alumno vinculado)`);
     }
 
     return {
-      message: studentProfile
-        ? 'Cuenta creada. Verifica tu email y confirma la vinculacion con tu hijo.'
-        : studentEmail
-          ? 'Cuenta creada. Verifica tu email. No encontramos ese alumno todavia, podras vincularlo luego desde tu cuenta.'
-          : 'Cuenta creada. Verifica tu email y luego vincula a tu hijo desde tu cuenta.',
+      message: studentProfile ? 'Cuenta creada. Verifica tu email y confirma la vinculacion con tu hijo.' : studentEmail ? 'Cuenta creada. Verifica tu email. No encontramos ese alumno todavia, podras vincularlo luego desde tu cuenta.' : 'Cuenta creada. Verifica tu email y luego vincula a tu hijo desde tu cuenta.',
       user_id: userId,
       profile_id: profileId,
+    };
+  }
+
+  async registerChild(parentUserId: string, dto: RegisterChildDto) {
+    const parentProfile = await this.parentRepo.findOne({ where: { user_id: parentUserId } });
+    if (!parentProfile) throw new ForbiddenException('Solo los padres pueden registrar hijos.');
+
+    const classroom = await this.classroomRepo.findOne({
+      where: { invite_code: dto.invite_code.toUpperCase(), is_archived: false },
+    });
+    if (!classroom) throw new NotFoundException('Código de invitación inválido.');
+
+    const access_code = String(randomInt(100000, 999999));
+    const access_code_hash = await bcrypt.hash(access_code, 10);
+
+    let device_pin_hash: string | null = null;
+    if (dto.device_pin) {
+      device_pin_hash = await bcrypt.hash(dto.device_pin, 10);
+    }
+
+    const internalEmail = `student.${randomBytes(8).toString('hex')}@novadev.internal`;
+
+    const { studentId } = await this.dataSource.transaction(async (manager) => {
+      const user = manager.create(User, {
+        email: internalEmail,
+        password_hash: '',
+        role: 'student',
+        is_verified: true,
+      });
+      await manager.save(user);
+
+      const profile = manager.create(StudentProfile, {
+        user_id: user.id,
+        alias: dto.alias,
+        avatar_id: dto.avatar_id ?? 'avatar_01',
+        xp_total: 0,
+        level: 1,
+        access_code_hash,
+        device_pin_hash,
+        require_pin_on_trusted_device: !!dto.device_pin,
+        link_code: randomBytes(4).toString('hex').toUpperCase(), // para compatibilidad
+      });
+      await manager.save(profile);
+
+      const link = manager.create(ParentStudent, {
+        parent_id: parentProfile.id,
+        student_id: profile.id,
+        status: 'confirmed',
+      });
+      await manager.save(link);
+
+      const cs = manager.create(ClassroomStudent, {
+        classroom_id: classroom.id,
+        student_id: profile.id,
+      });
+      await manager.save(cs);
+
+      return { studentId: profile.id };
+    });
+
+    this.logger.log(`Hijo registrado por padre ${parentUserId}: alias=${dto.alias}`);
+
+    return {
+      message: `Perfil de ${dto.alias} creado.`,
+      student_id: studentId,
+      classroom_id: classroom.id,
+      access_code, // ← mostrar UNA sola vez
     };
   }
 
@@ -281,6 +339,69 @@ export class AuthService {
       role: user.role,
       profile_id,
     };
+  }
+
+  async loginWithStudentCode(dto: LoginStudentCodeDto) {
+    const profile = await this.studentRepo.createQueryBuilder('s').where('LOWER(s.alias) = LOWER(:alias)', { alias: dto.alias }).andWhere('s.access_code_hash IS NOT NULL').getOne();
+
+    const genericError = new UnauthorizedException('Alias o código incorrectos.');
+    if (!profile) throw genericError;
+
+    if (!profile.access_code_hash) throw genericError;
+
+    const valid = await bcrypt.compare(dto.access_code, profile.access_code_hash);
+    if (!valid) throw genericError;
+
+    const user = await this.userRepo.findOne({ where: { id: profile.user_id } });
+    if (!user) throw new UnauthorizedException('Usuario no encontrado para este perfil.');
+    const tokens = await this.generateTokens(user, profile.id);
+
+    return { ...tokens, role: 'student', profile_id: profile.id };
+  }
+
+  async switchToChild(parentUserId: string, dto: SwitchToChildDto) {
+    const parentProfile = await this.parentRepo.findOne({ where: { user_id: parentUserId } });
+    if (!parentProfile) throw new ForbiddenException('No autorizado.');
+
+    const link = await this.parentStudentRepo.findOne({
+      where: { parent_id: parentProfile.id, student_id: dto.student_id, status: 'confirmed' },
+    });
+    if (!link) throw new ForbiddenException('Este alumno no está vinculado a tu cuenta.');
+
+    const profile = await this.studentRepo.findOne({ where: { id: dto.student_id } });
+    if (!profile) throw new NotFoundException('Perfil del alumno no encontrado.');
+
+    if (profile.require_pin_on_trusted_device) {
+      if (!dto.device_pin) throw new UnauthorizedException('Este perfil requiere PIN.');
+      if (!profile.device_pin_hash) throw new UnauthorizedException('PIN no configurado para este perfil.');
+      const pinValid = await bcrypt.compare(dto.device_pin, profile.device_pin_hash);
+      if (!pinValid) throw new UnauthorizedException('PIN incorrecto.');
+    }
+
+    const user = await this.userRepo.findOne({ where: { id: profile.user_id } });
+    if (!user) throw new NotFoundException('Usuario del alumno no encontrado.');
+
+    // JWT de corta duración (4h = una sesión del niño)
+    const access_token = await this.jwtService.signAsync({ sub: user.id, email: user.email, role: 'student', profile_id: profile.id }, { secret: this.configService.get('JWT_SECRET'), expiresIn: '4h' });
+
+    const { refresh_token } = await this.generateTokens(user, profile.id);
+
+    return { access_token, refresh_token, role: 'student', profile_id: profile.id };
+  }
+
+  async regenerateChildCode(parentUserId: string, studentId: string) {
+    const parentProfile = await this.parentRepo.findOne({ where: { user_id: parentUserId } });
+    const link = await this.parentStudentRepo.findOne({
+      where: { parent_id: parentProfile?.id, student_id: studentId, status: 'confirmed' },
+    });
+    if (!link) throw new ForbiddenException('Este alumno no está vinculado a tu cuenta.');
+
+    const access_code = String(randomInt(100000, 999999));
+    const access_code_hash = await bcrypt.hash(access_code, 10);
+
+    await this.studentRepo.update(studentId, { access_code_hash });
+
+    return { message: 'Código regenerado.', access_code };
   }
 
   // ─────────────────────────────────────────────────
@@ -390,7 +511,7 @@ export class AuthService {
       return { message: 'Tu cuenta ya estaba verificada.' };
     }
 
-    if (user.verification_token_expires_at < new Date()) {
+    if (!user.verification_token_expires_at || user.verification_token_expires_at < new Date()) {
       throw new BadRequestException('El token de verificación expiró. Solicitá uno nuevo.');
     }
 
@@ -513,10 +634,9 @@ export class AuthService {
     const ttl = exp - Math.floor(Date.now() / 1000);
     try {
       await this.redisService.set(`blacklist:${jti}`, '1', ttl);
-    } catch (err) {
-      this.logger.warn(
-        `Logout: no se pudo escribir en Redis (blacklist). Motivo: ${err?.message}`,
-      );
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : 'error desconocido';
+      this.logger.warn(`Logout: no se pudo escribir en Redis (blacklist). Motivo: ${reason}`);
     }
 
     // Invalidar refresh token borrando el hash guardado
@@ -538,10 +658,7 @@ export class AuthService {
   }
 
   private async buildParentLinkToken(linkId: string, hours: number) {
-    return this.jwtService.signAsync(
-      { type: 'parent_link', link_id: linkId },
-      { expiresIn: `${hours}h` },
-    );
+    return this.jwtService.signAsync({ type: 'parent_link', link_id: linkId }, { expiresIn: `${hours}h` });
   }
 
   private async checkEmailAvailable(email: string) {
@@ -591,10 +708,13 @@ export class AuthService {
         secret: this.configService.get<string>('JWT_SECRET'),
         expiresIn: this.configService.get<string>('JWT_EXPIRES_IN'),
       }),
-      this.jwtService.signAsync({ ...payload, jti: randomUUID() }, {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-        expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN'),
-      }),
+      this.jwtService.signAsync(
+        { ...payload, jti: randomUUID() },
+        {
+          secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+          expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN'),
+        },
+      ),
     ]);
 
     // Guardar hash del refresh token — permite invalidarlo en logout
@@ -604,7 +724,10 @@ export class AuthService {
     return { access_token, refresh_token };
   }
 
-  async getMyProfile(userId: string, role: string): Promise<{
+  async getMyProfile(
+    userId: string,
+    role: string,
+  ): Promise<{
     id: string;
     email: string;
     role: string;
@@ -621,17 +744,28 @@ export class AuthService {
     switch (role) {
       case 'teacher': {
         const p = await this.teacherRepo.findOne({ where: { user_id: userId } });
-        if (p) { firstName = p.first_name; lastName = p.last_name; profileId = p.id; }
+        if (p) {
+          firstName = p.first_name;
+          lastName = p.last_name;
+          profileId = p.id;
+        }
         break;
       }
       case 'student': {
         const p = await this.studentRepo.findOne({ where: { user_id: userId } });
-        if (p) { firstName = p.alias; profileId = p.id; }
+        if (p) {
+          firstName = p.alias;
+          profileId = p.id;
+        }
         break;
       }
       case 'parent': {
         const p = await this.parentRepo.findOne({ where: { user_id: userId } });
-        if (p) { firstName = p.first_name; lastName = p.last_name; profileId = p.id; }
+        if (p) {
+          firstName = p.first_name;
+          lastName = p.last_name;
+          profileId = p.id;
+        }
         break;
       }
     }

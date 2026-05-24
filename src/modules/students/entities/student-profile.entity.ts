@@ -1,54 +1,56 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-  UpdateDateColumn,
-  OneToOne,
-  JoinColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToOne, JoinColumn } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 
 @Entity('student_profiles')
 export class StudentProfile {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  user_id: string;
+  user_id!: string;
 
   @OneToOne(() => User)
   @JoinColumn({ name: 'user_id' })
-  user: User;
+  user!: User;
 
   @Column({ length: 30 })
-  alias: string;
+  alias!: string;
 
   @Column({ nullable: true, length: 50 })
-  avatar_id: string;
+  avatar_id!: string | null;
 
   @Column({ type: 'text', nullable: true })
-  bio: string;
+  bio!: string | null;
 
   @Column({ nullable: true, length: 80 })
-  status_message: string;
+  status_message!: string | null;
 
   @Column({ type: 'date', nullable: true })
-  birth_date: string | null;
+  birth_date!: string | null;
 
   // Código de 6 chars para que el padre vincule al alumno
   @Column({ nullable: true, length: 8, unique: true })
-  link_code: string;
+  link_code!: string | null;
+
+  @Column({ nullable: true, length: 255 })
+  access_code_hash!: string | null; // código de 6 dígitos para entrar desde otro dispositivo
+
+  @Column({ nullable: true, length: 255 })
+  device_pin_hash!: string | null; // PIN opcional para dispositivos de confianza
+
+  @Column({ default: false })
+  require_pin_on_trusted_device!: boolean;
 
   @Column({ type: 'int', default: 0 })
-  xp_total: number;
+  xp_total!: number;
 
   @Column({ type: 'int', default: 1 })
-  level: number;
+  level!: number;
 
   @CreateDateColumn({ type: 'timestamptz' })
-  created_at: Date;
+  created_at!: Date;
 
   @UpdateDateColumn({ type: 'timestamptz' })
-  updated_at: Date;
+  updated_at!: Date;
 }
+

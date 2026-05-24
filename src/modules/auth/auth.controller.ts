@@ -7,7 +7,9 @@ import { AuthService } from './auth.service';
 import { RegisterTeacherDto } from './dto/register-teacher.dto';
 import { RegisterStudentDto } from './dto/register-student.dto';
 import { RegisterParentDto } from './dto/register-parent.dto';
+import { RegisterChildDto } from '../students/dto/register-child.dto';
 import { LoginDto } from './dto/login.dto';
+import { LoginStudentCodeDto, SwitchToChildDto } from './dto/login-student-code.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ConfirmParentLinkDto } from './dto/confirm-parent-link.dto';
@@ -15,12 +17,15 @@ import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+
 import { RecaptchaGuard } from './guards/recaptcha.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GoogleOAuthGuard } from './guards/google-oauth.guard';
+
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -81,6 +86,24 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Credenciales inválidas.' })
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Public()
+  @Post('login/student-code')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Login de alumno con alias + código de 6 dígitos (dispositivo nuevo)' })
+  async loginStudentCode(@Body() dto: LoginStudentCodeDto) {
+    return this.authService.loginWithStudentCode(dto);
+  }
+
+  @Post('switch-to-child')
+  @UseGuards(JwtAuthGuard)
+  @Roles('parent')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cambiar al perfil de un hijo (dispositivo de confianza, el padre ya está logueado)' })
+  async switchToChild(@CurrentUser() user: any, @Body() dto: SwitchToChildDto) {
+    return this.authService.switchToChild(user.sub, dto);
   }
 
   // ─────────────────────────────────────────────────
