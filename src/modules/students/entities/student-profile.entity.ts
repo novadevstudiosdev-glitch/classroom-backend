@@ -16,26 +16,26 @@ export class StudentProfile {
   @Column({ length: 30 })
   alias!: string;
 
-  @Column({ nullable: true, length: 50 })
+  @Column({ type: 'varchar', nullable: true, length: 50 })
   avatar_id!: string | null;
 
   @Column({ type: 'text', nullable: true })
   bio!: string | null;
 
-  @Column({ nullable: true, length: 80 })
+  @Column({ type: 'varchar', nullable: true, length: 80 })
   status_message!: string | null;
 
   @Column({ type: 'date', nullable: true })
   birth_date!: string | null;
 
   // Código de 6 chars para que el padre vincule al alumno
-  @Column({ nullable: true, length: 8, unique: true })
+  @Column({ type: 'varchar', nullable: true, length: 8, unique: true })
   link_code!: string | null;
 
-  @Column({ nullable: true, length: 255 })
+  @Column({ type: 'varchar', nullable: true, length: 255 })
   access_code_hash!: string | null; // código de 6 dígitos para entrar desde otro dispositivo
 
-  @Column({ nullable: true, length: 255 })
+  @Column({ type: 'varchar', nullable: true, length: 255 })
   device_pin_hash!: string | null; // PIN opcional para dispositivos de confianza
 
   @Column({ default: false })
@@ -53,4 +53,5 @@ export class StudentProfile {
   @UpdateDateColumn({ type: 'timestamptz' })
   updated_at!: Date;
 }
+
 
