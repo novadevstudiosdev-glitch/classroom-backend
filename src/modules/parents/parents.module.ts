@@ -9,9 +9,13 @@ import { StudentProfile } from '../students/entities/student-profile.entity';
 import { LessonProgress } from '../progress/entities/lesson-progress.entity';
 import { Session } from '../sessions/entities/session.entity';
 import { User } from '../users/entities/user.entity';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ParentProfile, ParentStudent, StudentProfile, LessonProgress, Session, User])],
+  imports: [
+    TypeOrmModule.forFeature([ParentProfile, ParentStudent, StudentProfile, LessonProgress, Session, User]),
+    AuthModule,
+  ],
   controllers: [ParentsController],
   providers: [ParentsService, ReportsService],
   exports: [ParentsService, ReportsService],
